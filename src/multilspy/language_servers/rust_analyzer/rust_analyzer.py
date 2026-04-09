@@ -63,8 +63,8 @@ class RustAnalyzer(LanguageServer):
 
         rustanalyzer_ls_dir = os.path.join(os.path.dirname(__file__), "static", "RustAnalyzer")
         rustanalyzer_executable_path = os.path.join(rustanalyzer_ls_dir, dependency["binaryName"])
-        if not os.path.exists(rustanalyzer_ls_dir):
-            os.makedirs(rustanalyzer_ls_dir)
+        if not os.path.exists(rustanalyzer_executable_path):
+            os.makedirs(rustanalyzer_ls_dir, exist_ok=True)
             if dependency["archiveType"] == "gz":
                 FileUtils.download_and_extract_archive(
                     logger, dependency["url"], rustanalyzer_executable_path, dependency["archiveType"]

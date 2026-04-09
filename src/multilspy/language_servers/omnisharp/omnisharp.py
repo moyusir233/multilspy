@@ -178,24 +178,24 @@ class OmniSharp(LanguageServer):
         assert "RazorOmnisharp" in runtime_dependencies
 
         omnisharp_ls_dir = os.path.join(os.path.dirname(__file__), "static", "OmniSharp")
-        if not os.path.exists(omnisharp_ls_dir):
-            os.makedirs(omnisharp_ls_dir)
+        omnisharp_executable_path = os.path.join(omnisharp_ls_dir, runtime_dependencies["OmniSharp"]["binaryName"])
+        if not os.path.exists(omnisharp_executable_path):
+            os.makedirs(omnisharp_ls_dir, exist_ok=True)
             FileUtils.download_and_extract_archive(
                 logger, runtime_dependencies["OmniSharp"]["url"], omnisharp_ls_dir, "zip"
             )
-        omnisharp_executable_path = os.path.join(omnisharp_ls_dir, runtime_dependencies["OmniSharp"]["binaryName"])
         assert os.path.exists(omnisharp_executable_path)
         os.chmod(omnisharp_executable_path, stat.S_IEXEC)
 
         razor_omnisharp_ls_dir = os.path.join(os.path.dirname(__file__), "static", "RazorOmnisharp")
-        if not os.path.exists(razor_omnisharp_ls_dir):
-            os.makedirs(razor_omnisharp_ls_dir)
-            FileUtils.download_and_extract_archive(
-                logger, runtime_dependencies["RazorOmnisharp"]["url"], razor_omnisharp_ls_dir, "zip"
-            )
         razor_omnisharp_dll_path = os.path.join(
             razor_omnisharp_ls_dir, runtime_dependencies["RazorOmnisharp"]["dll_path"]
         )
+        if not os.path.exists(razor_omnisharp_dll_path):
+            os.makedirs(razor_omnisharp_ls_dir, exist_ok=True)
+            FileUtils.download_and_extract_archive(
+                logger, runtime_dependencies["RazorOmnisharp"]["url"], razor_omnisharp_ls_dir, "zip"
+            )
         assert os.path.exists(razor_omnisharp_dll_path)
 
         return omnisharp_executable_path, razor_omnisharp_dll_path

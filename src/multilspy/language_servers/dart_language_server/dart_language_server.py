@@ -48,8 +48,8 @@ class DartLanguageServer(LanguageServer):
         dart_ls_dir = os.path.join(os.path.dirname(__file__), "static", "dart-language-server")
         dart_executable_path = os.path.join(dart_ls_dir, dependency["binaryName"])
 
-        if not os.path.exists(dart_ls_dir):
-            os.makedirs(dart_ls_dir)
+        if not os.path.exists(dart_executable_path):
+            os.makedirs(dart_ls_dir, exist_ok=True)
             FileUtils.download_and_extract_archive(
                 logger, dependency["url"], dart_ls_dir, dependency["archiveType"]
             )
