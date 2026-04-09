@@ -34,39 +34,24 @@ jobs:
       with:
         ruby-version: '3.4'
 
-    - name: Install Solargraph
-      run: gem install solargraph
-
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Set up Java
-      uses: actions/setup-java@v4
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
       with:
-        distribution: 'temurin'
-        java-version: '17'
+        dotnet-version: '8.0.x'
 
     - name: Remove problematic JDK installations
       run: |
         sudo rm -rf /usr/lib/jvm/temurin-8-jdk-amd64 || true
         sudo rm -rf /usr/lib/jvm/adoptopenjdk-8-hotspot-amd64 || true
 
-    - name: Set up Gradle
-      uses: gradle/actions/setup-gradle@v4
-
     - name: Fix Gradle and Maven permissions
       run: |
         sudo chmod a+x /usr/bin/gradle /usr/bin/mvn || true
-
-    - name: Set up .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
 
     - name: Install dependencies
       run: |

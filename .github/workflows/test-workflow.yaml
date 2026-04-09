@@ -27,6 +27,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: "pip"
 
+    # --- System-level dependencies for language servers that do NOT self-download ---
+    # Gopls requires go + gopls pre-installed
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -35,49 +37,40 @@ jobs:
     - name: Install gopls
       run: go install golang.org/x/tools/gopls@latest
 
+    # Solargraph requires ruby (installs solargraph gem itself if missing)
     - name: Set up Ruby
       uses: ruby/setup-ruby@v1
       with:
         ruby-version: '3.4'
 
-    - name: Install Solargraph
-      run: gem install solargraph
-
+    # TypeScript LS requires node + npm (installs ts-language-server itself via npm)
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Set up Java
-      uses: actions/setup-java@v4
+    # OmniSharp requires dotnet runtime
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
       with:
-        distribution: 'temurin'
-        java-version: '17'
+        dotnet-version: '8.0.x'
 
+    # --- Workarounds for GitHub runner environment issues ---
+    # JDTLS downloads its own JRE, but pre-installed JDKs on the runner
+    # with broken permissions cause JDTLS initialization to fail
     - name: Remove problematic JDK installations
       run: |
         sudo rm -rf /usr/lib/jvm/temurin-8-jdk-amd64 || true
         sudo rm -rf /usr/lib/jvm/adoptopenjdk-8-hotspot-amd64 || true
 
-    - name: Set up Gradle
-      uses: gradle/actions/setup-gradle@v4
-
+    # KLS downloads its own JRE, but invokes system gradle/mvn for classpath
+    # resolution. These are pre-installed on GitHub runners but may lack
+    # execute permissions for non-owner users.
     - name: Fix Gradle and Maven permissions
       run: |
-        # The KLS resolves classpath by invoking gradle/mvn directly.
-        # On GitHub runners these may lack execute permission for non-owners.
         sudo chmod a+x /usr/bin/gradle /usr/bin/mvn || true
-        # Verify they're actually runnable
         gradle --version || echo "WARNING: gradle not runnable"
         mvn --version || echo "WARNING: mvn not runnable"
-
-    - name: Set up .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
 
     - name: Install dependencies
       run: |
