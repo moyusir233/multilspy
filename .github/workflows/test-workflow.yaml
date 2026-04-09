@@ -160,10 +160,14 @@ jobs:
           java-version: "17"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-      - name: Fix Gradle permissions
+      - name: Fix Gradle and Maven permissions
         run: |
-          sudo chmod +x /usr/bin/gradle || true
-          sudo chmod +x /usr/bin/mvn || true
+          # The KLS resolves classpath by invoking gradle/mvn directly.
+          # On GitHub runners these may lack execute permission for non-owners.
+          sudo chmod a+x /usr/bin/gradle /usr/bin/mvn || true
+          # Verify they're actually runnable
+          gradle --version || echo "WARNING: gradle not runnable"
+          mvn --version || echo "WARNING: mvn not runnable"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
