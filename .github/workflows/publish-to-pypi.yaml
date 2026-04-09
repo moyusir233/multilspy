@@ -1,6 +1,5 @@
 name: Publish Python 🐍 distribution 📦 to PyPI and TestPyPI
 
-
 on:
   push:
     branches:
@@ -19,7 +18,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.11"
+        python-version: "3.12"
         cache: "pip"
 
     - name: Set up Go
@@ -35,32 +34,24 @@ jobs:
       with:
         ruby-version: '3.4'
 
-    - name: Install Solargraph
-      run: gem install solargraph
-
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Set up Java
-      uses: actions/setup-java@v4
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
       with:
-        distribution: 'temurin'
-        java-version: '17'
+        dotnet-version: '8.0.x'
 
     - name: Remove problematic JDK installations
       run: |
         sudo rm -rf /usr/lib/jvm/temurin-8-jdk-amd64 || true
         sudo rm -rf /usr/lib/jvm/adoptopenjdk-8-hotspot-amd64 || true
 
-    - name: Set up .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
+    - name: Fix Gradle and Maven permissions
+      run: |
+        sudo chmod a+x /usr/bin/gradle /usr/bin/mvn || true
 
     - name: Install dependencies
       run: |
@@ -69,8 +60,7 @@ jobs:
         pip install -e .
 
     - name: Run all tests
-      run: |
-        pytest tests/multilspy -v --tb=short
+      run: pytest tests/multilspy -v --tb=short
 
   build:
     name: Build the distribution
@@ -83,7 +73,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.x"
+        python-version: "3.12"
     - name: Install pypa/build
       run: >-
         python3 -m

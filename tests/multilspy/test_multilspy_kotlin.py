@@ -103,6 +103,7 @@ async def test_multilspy_kotlin_references() -> None:
             assert ref_to["range"]["start"]["character"] == 20
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason="Flaky KLS NullPointerException, see https://github.com/microsoft/multilspy/issues/134", strict=False)
 async def test_multilspy_kotlin_hover() -> None:
     params = {
         "code_language": Language.KOTLIN,

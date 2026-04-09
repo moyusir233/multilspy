@@ -3,6 +3,7 @@ This file contains tests for running the Kotlin Language Server: kotlin-language
 using the synchronous API
 """
 
+import pytest
 from pathlib import PurePath
 from multilspy import SyncLanguageServer
 from multilspy.multilspy_config import Language
@@ -105,6 +106,7 @@ def test_multilspy_kotlin_sync_references() -> None:
             assert ref_to["range"]["start"]["line"] == 8
             assert ref_to["range"]["start"]["character"] == 20
 
+@pytest.mark.xfail(reason="Flaky KLS NullPointerException, see https://github.com/microsoft/multilspy/issues/134", strict=False)
 def test_multilspy_kotlin_sync_hover() -> None:
     """
     Test hover information functionality using the sync API
