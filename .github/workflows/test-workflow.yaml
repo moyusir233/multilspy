@@ -9,291 +9,81 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PYTHON_VERSION: "3.12"
-
 jobs:
-  test-python:
-    name: Test Python Language Server
+  test:
+    name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run Python LSP tests
-        run: pytest tests/multilspy/test_multilspy_python.py tests/multilspy/test_sync_multilspy_python.py -v --tb=short
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+      fail-fast: false
 
-  test-go:
-    name: Test Go Language Server
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.21"
-      - name: Install gopls
-        run: go install golang.org/x/tools/gopls@latest
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run Go LSP tests
-        run: pytest tests/multilspy/test_multilspy_go.py -v --tb=short
+    - uses: actions/checkout@v4
 
-  test-ruby:
-    name: Test Ruby Language Server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.4"
-      - name: Install Solargraph
-        run: gem install solargraph
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run Ruby LSP tests
-        run: pytest tests/multilspy/test_multilspy_ruby.py tests/multilspy/test_sync_multilspy_ruby.py -v --tb=short
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: "pip"
 
-  test-typescript-javascript:
-    name: Test TypeScript/JavaScript Language Server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run TypeScript and JavaScript LSP tests
-        run: pytest tests/multilspy/test_multilspy_typescript.py tests/multilspy/test_sync_multilspy_typescript.py tests/multilspy/test_multilspy_javascript.py tests/multilspy/test_sync_multilspy_javascript.py -v --tb=short
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
 
-  test-rust:
-    name: Test Rust Language Server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run Rust LSP tests
-        run: pytest tests/multilspy/test_multilspy_rust.py tests/multilspy/test_sync_multilspy_rust.py -v --tb=short
+    - name: Install gopls
+      run: go install golang.org/x/tools/gopls@latest
 
-  test-java:
-    name: Test Java Language Server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-      - name: Remove problematic JDK installations
-        run: |
-          sudo rm -rf /usr/lib/jvm/temurin-8-jdk-amd64 || true
-          sudo rm -rf /usr/lib/jvm/adoptopenjdk-8-hotspot-amd64 || true
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run Java LSP tests
-        run: pytest tests/multilspy/test_multilspy_java.py tests/multilspy/test_sync_multilspy_java.py -v --tb=short
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.4'
 
-  test-kotlin:
-    name: Test Kotlin Language Server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-      - name: Fix Gradle and Maven permissions
-        run: |
-          # The KLS resolves classpath by invoking gradle/mvn directly.
-          # On GitHub runners these may lack execute permission for non-owners.
-          sudo chmod a+x /usr/bin/gradle /usr/bin/mvn || true
-          # Verify they're actually runnable
-          gradle --version || echo "WARNING: gradle not runnable"
-          mvn --version || echo "WARNING: mvn not runnable"
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run Kotlin LSP tests
-        run: pytest tests/multilspy/test_multilspy_kotlin.py tests/multilspy/test_sync_multilspy_kotlin.py -v --tb=short
+    - name: Install Solargraph
+      run: gem install solargraph
 
-  test-dart:
-    name: Test Dart Language Server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run Dart LSP tests
-        run: pytest tests/multilspy/test_multilspy_dart.py tests/multilspy/test_sync_multilspy_dart.py -v --tb=short
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
 
-  test-clangd:
-    name: Test C/C++ Language Server (clangd)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run C/C++ LSP tests
-        run: pytest tests/multilspy/test_multilspy_clangd.py -v --tb=short
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
 
-  test-csharp:
-    name: Test C# Language Server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run C# LSP tests
-        run: pytest tests/multilspy/test_multilspy_csharp.py tests/multilspy/test_sync_multilspy_csharp.py -v --tb=short
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
 
-  test-sync-timeout:
-    name: Test Sync Timeout
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e .
-      - name: Run sync timeout tests
-        run: pytest tests/multilspy/test_sync_multilspy_timeout.py -v --tb=short
+    - name: Remove problematic JDK installations
+      run: |
+        sudo rm -rf /usr/lib/jvm/temurin-8-jdk-amd64 || true
+        sudo rm -rf /usr/lib/jvm/adoptopenjdk-8-hotspot-amd64 || true
 
-  all-tests-passed:
-    name: All Tests Passed
-    needs:
-      - test-python
-      - test-go
-      - test-ruby
-      - test-typescript-javascript
-      - test-rust
-      - test-java
-      - test-kotlin
-      - test-dart
-      - test-clangd
-      - test-csharp
-      - test-sync-timeout
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check all tests passed
-        run: |
-          results=(
-            "${{ needs.test-python.result }}"
-            "${{ needs.test-go.result }}"
-            "${{ needs.test-ruby.result }}"
-            "${{ needs.test-typescript-javascript.result }}"
-            "${{ needs.test-rust.result }}"
-            "${{ needs.test-java.result }}"
-            "${{ needs.test-kotlin.result }}"
-            "${{ needs.test-dart.result }}"
-            "${{ needs.test-clangd.result }}"
-            "${{ needs.test-csharp.result }}"
-            "${{ needs.test-sync-timeout.result }}"
-          )
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
 
-          for result in "${results[@]}"; do
-            if [[ "$result" != "success" ]]; then
-              echo "One or more test jobs failed!"
-              exit 1
-            fi
-          done
-          echo "All tests passed!"
+    - name: Fix Gradle and Maven permissions
+      run: |
+        # The KLS resolves classpath by invoking gradle/mvn directly.
+        # On GitHub runners these may lack execute permission for non-owners.
+        sudo chmod a+x /usr/bin/gradle /usr/bin/mvn || true
+        # Verify they're actually runnable
+        gradle --version || echo "WARNING: gradle not runnable"
+        mvn --version || echo "WARNING: mvn not runnable"
+
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+
+    - name: Run tests
+      run: pytest tests/multilspy -v --tb=short

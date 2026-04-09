@@ -7,9 +7,6 @@ on:
     tags:
       - 'v*'  # Match tags starting with "v"
 
-env:
-  PYTHON_VERSION: "3.12"
-
 jobs:
   test:
     name: Test the distribution
@@ -21,7 +18,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ env.PYTHON_VERSION }}
+        python-version: "3.12"
         cache: "pip"
 
     - name: Set up Go
@@ -91,7 +88,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ env.PYTHON_VERSION }}
+        python-version: "3.12"
     - name: Install pypa/build
       run: >-
         python3 -m
