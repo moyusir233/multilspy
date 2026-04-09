@@ -7,6 +7,9 @@ on:
     tags:
       - 'v*'  # Match tags starting with "v"
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
   test:
     name: Test the distribution
@@ -14,28 +17,69 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: "pip"
+
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.21'
+
     - name: Install gopls
       run: go install golang.org/x/tools/gopls@latest
-    - name: Install ruby
+
+    - name: Set up Ruby
       uses: ruby/setup-ruby@v1
       with:
         ruby-version: '3.4'
-    - name: Set up Python
-      uses: actions/setup-python@v5
+
+    - name: Install Solargraph
+      run: gem install solargraph
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        python-version: "3.x"
+        node-version: '20'
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Remove problematic JDK installations
+      run: |
+        sudo rm -rf /usr/lib/jvm/temurin-8-jdk-amd64 || true
+        sudo rm -rf /usr/lib/jvm/adoptopenjdk-8-hotspot-amd64 || true
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Fix Gradle permissions
+      run: |
+        sudo chmod +x /usr/bin/gradle || true
+        sudo chmod +x /usr/bin/mvn || true
+
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    - name: Test with pytest
-      run: |
-        pip install pytest
-        pytest tests/multilspy
+        pip install -e .
+
+    - name: Run all tests
+      run: pytest tests/multilspy -v --tb=short
 
   build:
     name: Build the distribution
@@ -48,7 +92,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.x"
+        python-version: ${{ env.PYTHON_VERSION }}
     - name: Install pypa/build
       run: >-
         python3 -m
@@ -66,13 +110,14 @@ jobs:
   publish-to-pypi:
     name: >-
       Publish Python 🐍 distribution 📦 to PyPI
-    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    # Only publish on tag pushes AND only on the original repo (not forks)
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'microsoft/multilspy'
     needs:
     - build
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/multilspy  # Replace <package-name> with your PyPI project name
+      url: https://pypi.org/p/multilspy
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
 
@@ -92,6 +137,8 @@ jobs:
     name: >-
       Sign the Python 🐍 distribution 📦 with Sigstore
       and upload them to GitHub Release
+    # Only run on the original repo (not forks)
+    if: github.repository == 'microsoft/multilspy'
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
@@ -123,9 +170,6 @@ jobs:
     - name: Upload artifact signatures to GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}
-      # Upload to GitHub Release using the `gh` CLI.
-      # `dist/` contains the built packages, and the
-      # sigstore-produced signatures and certificates.
       run: >-
         gh release upload
         '${{ github.ref_name }}-auto' dist/**
@@ -133,6 +177,8 @@ jobs:
 
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
+    # Only run on the original repo (not forks)
+    if: github.repository == 'microsoft/multilspy'
     needs:
     - build
     runs-on: ubuntu-latest
