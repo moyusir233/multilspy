@@ -69,8 +69,8 @@ class ClangdLanguageServer(LanguageServer):
 
         clangd_ls_dir = os.path.join(os.path.dirname(__file__), "static", "clangd")
         clangd_executable_path = os.path.join(clangd_ls_dir, "clangd_19.1.2", "bin", dependency["binaryName"])
-        if not os.path.exists(clangd_ls_dir):
-            os.makedirs(clangd_ls_dir)
+        if not os.path.exists(clangd_executable_path):
+            os.makedirs(clangd_ls_dir, exist_ok=True)
             if dependency["archiveType"] == "zip":
                 FileUtils.download_and_extract_archive(
                     logger, dependency["url"], clangd_ls_dir, dependency["archiveType"]

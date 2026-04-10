@@ -76,7 +76,8 @@ class TypeScriptLanguageServer(LanguageServer):
         assert is_npm_installed, "npm is not installed or isn't in PATH. Please install npm and try again."
 
         # Install typescript and typescript-language-server if not already installed
-        if not os.path.exists(tsserver_ls_dir):
+        tsserver_executable_path = os.path.join(tsserver_ls_dir, "node_modules", ".bin", "typescript-language-server")
+        if not os.path.exists(tsserver_executable_path):
             os.makedirs(tsserver_ls_dir, exist_ok=True)
             for dependency in runtime_dependencies:
                 # Windows doesn't support the 'user' parameter and doesn't have pwd module
@@ -102,7 +103,6 @@ class TypeScriptLanguageServer(LanguageServer):
                         stderr=subprocess.DEVNULL
                     )
         
-        tsserver_executable_path = os.path.join(tsserver_ls_dir, "node_modules", ".bin", "typescript-language-server")
         assert os.path.exists(tsserver_executable_path), "typescript-language-server executable not found. Please install typescript-language-server and try again."
         return f"{tsserver_executable_path} --stdio"
 
