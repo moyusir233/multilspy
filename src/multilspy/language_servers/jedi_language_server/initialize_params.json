@@ -568,7 +568,7 @@
         },
         "cachePriming": {
             "enable": true,
-            "numThreads": 0
+            "numThreads": "physical"
         },
         "cargo": {
             "autoreload": true,

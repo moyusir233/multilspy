@@ -1,11 +1,13 @@
 """
 Multilspy logger module.
 """
+
 import inspect
 import json
 import logging
 from datetime import datetime
 from typing_extensions import TypedDict
+
 
 class LogLine(TypedDict):
     """
@@ -19,6 +21,7 @@ class LogLine(TypedDict):
     caller_line: int
     message: str
 
+
 class MultilspyLogger:
     """
     Logger class
@@ -26,15 +29,18 @@ class MultilspyLogger:
 
     def __init__(self) -> None:
         self.logger = logging.getLogger("multilspy")
-        self.logger.setLevel(logging.INFO)
 
-    def log(self, debug_message: str, level: int, sanitized_error_message: str = "") -> None:
+    def log(
+        self, debug_message: str, level: int, sanitized_error_message: str = ""
+    ) -> None:
         """
         Log the debug and santized messages using the logger
         """
 
         debug_message = debug_message.replace("'", '"').replace("\n", " ")
-        sanitized_error_message = sanitized_error_message.replace("'", '"').replace("\n", " ")
+        sanitized_error_message = sanitized_error_message.replace("'", '"').replace(
+            "\n", " "
+        )
 
         # Collect details about the callee
         curframe = inspect.currentframe()
@@ -50,7 +56,7 @@ class MultilspyLogger:
             caller_file=caller_file,
             caller_name=caller_name,
             caller_line=caller_line,
-            message=debug_message
+            message=debug_message,
         )
 
         self.logger.log(
