@@ -580,13 +580,29 @@
                 "enable": true,
                 "invocationLocation": "workspace",
                 "invocationStrategy": "per_workspace",
-                "overrideCommand": null,
-                "useRustcWrapper": true
+                "useRustcWrapper": true,
+                "overrideCommand": [
+                    "cargo",
+                    "xtask",
+                    "check",
+                    "--json-output",
+                    "-p",
+                    "lark",
+                    "--features",
+                    "console-test"
+                ]
             },
-            "cfgs": {},
+            "cfgs": [
+                "debug_assertions",
+                "miri",
+                "lark_desktop"
+            ],
+            "features": [
+                "console-test",
+                "enable_lgbm"
+            ],
             "extraArgs": [],
             "extraEnv": {},
-            "features": [],
             "noDefaultFeatures": false,
             "sysroot": "discover",
             "sysrootSrc": null,
@@ -606,7 +622,39 @@
             "invocationLocation": "workspace",
             "invocationStrategy": "per_workspace",
             "noDefaultFeatures": null,
-            "overrideCommand": null,
+            "overrideCommand": [
+                "cargo",
+                "xtask",
+                "check",
+                "--json-output",
+                "-p",
+                "lark",
+                "--features",
+                "console-test"
+            ],
+            "cargo": {
+                "buildScripts": {
+                    "overrideCommand": [
+                        "cargo",
+                        "xtask",
+                        "check",
+                        "--json-output",
+                        "-p",
+                        "lark",
+                        "--features",
+                        "console-test"
+                    ]
+                },
+                "cfgs": [
+                    "debug_assertions",
+                    "miri",
+                    "lark_desktop"
+                ],
+                "features": [
+                    "console-test",
+                    "enable_lgbm"
+                ]
+            },
             "targets": null
         },
         "completion": {

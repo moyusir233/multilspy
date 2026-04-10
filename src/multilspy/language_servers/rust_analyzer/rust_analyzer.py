@@ -25,7 +25,12 @@ class RustAnalyzer(LanguageServer):
     Provides Rust specific instantiation of the LanguageServer class. Contains various configurations and settings specific to Rust.
     """
 
-    def __init__(self, config: MultilspyConfig, logger: MultilspyLogger, repository_root_path: str):
+    def __init__(
+        self,
+        config: MultilspyConfig,
+        logger: MultilspyLogger,
+        repository_root_path: str,
+    ):
         """
         Creates a RustAnalyzer instance. This class is not meant to be instantiated directly. Use LanguageServer.create() instead.
         """
@@ -34,18 +39,44 @@ class RustAnalyzer(LanguageServer):
             config,
             logger,
             repository_root_path,
-            ProcessLaunchInfo(cmd=rustanalyzer_executable_path, cwd=repository_root_path),
+            ProcessLaunchInfo(
+                cmd=rustanalyzer_executable_path, cwd=repository_root_path
+            ),
             "rust",
         )
         self.server_ready = asyncio.Event()
 
-    def setup_runtime_dependencies(self, logger: MultilspyLogger, config: MultilspyConfig) -> str:
+    def setup_runtime_dependencies(
+        self, logger: MultilspyLogger, config: MultilspyConfig
+    ) -> str:
         """
         Setup runtime dependencies for rust_analyzer.
         """
+        import subprocess
+
+        # check `rust-analyzer` can run directly by `bash -c "rust-analyzer --version"`
+        try:
+            process = subprocess.run(
+                ["bash", "-c", "which rust-analyzer"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            if len(process.stdout) != 0:
+                return process.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            logger.log(
+                f"Failed to run `rust-analyzer --version`: {e}",
+                logging.ERROR,
+            )
+            raise e
+
         platform_id = PlatformUtils.get_platform_id()
 
-        with open(os.path.join(os.path.dirname(__file__), "runtime_dependencies.json"), "r") as f:
+        with open(
+            os.path.join(os.path.dirname(__file__), "runtime_dependencies.json"), "r"
+        ) as f:
             d = json.load(f)
             del d["_description"]
 
@@ -56,22 +87,34 @@ class RustAnalyzer(LanguageServer):
 
         runtime_dependencies = d["runtimeDependencies"]
         runtime_dependencies = [
-            dependency for dependency in runtime_dependencies if dependency["platformId"] == platform_id.value
+            dependency
+            for dependency in runtime_dependencies
+            if dependency["platformId"] == platform_id.value
         ]
         assert len(runtime_dependencies) == 1
         dependency = runtime_dependencies[0]
 
-        rustanalyzer_ls_dir = os.path.join(os.path.dirname(__file__), "static", "RustAnalyzer")
-        rustanalyzer_executable_path = os.path.join(rustanalyzer_ls_dir, dependency["binaryName"])
+        rustanalyzer_ls_dir = os.path.join(
+            os.path.dirname(__file__), "static", "RustAnalyzer"
+        )
+        rustanalyzer_executable_path = os.path.join(
+            rustanalyzer_ls_dir, dependency["binaryName"]
+        )
         if not os.path.exists(rustanalyzer_executable_path):
             os.makedirs(rustanalyzer_ls_dir, exist_ok=True)
             if dependency["archiveType"] == "gz":
                 FileUtils.download_and_extract_archive(
-                    logger, dependency["url"], rustanalyzer_executable_path, dependency["archiveType"]
+                    logger,
+                    dependency["url"],
+                    rustanalyzer_executable_path,
+                    dependency["archiveType"],
                 )
             else:
                 FileUtils.download_and_extract_archive(
-                    logger, dependency["url"], rustanalyzer_ls_dir, dependency["archiveType"]
+                    logger,
+                    dependency["url"],
+                    rustanalyzer_ls_dir,
+                    dependency["archiveType"],
                 )
         assert os.path.exists(rustanalyzer_executable_path)
         os.chmod(rustanalyzer_executable_path, stat.S_IEXEC)
@@ -82,7 +125,9 @@ class RustAnalyzer(LanguageServer):
         """
         Returns the initialize params for the Rust Analyzer Language Server.
         """
-        with open(os.path.join(os.path.dirname(__file__), "initialize_params.json"), "r") as f:
+        with open(
+            os.path.join(os.path.dirname(__file__), "initialize_params.json"), "r"
+        ) as f:
             d = json.load(f)
 
         del d["_description"]
@@ -95,7 +140,9 @@ class RustAnalyzer(LanguageServer):
         d["rootUri"] = pathlib.Path(repository_absolute_path).as_uri()
 
         assert d["workspaceFolders"][0]["uri"] == "$uri"
-        d["workspaceFolders"][0]["uri"] = pathlib.Path(repository_absolute_path).as_uri()
+        d["workspaceFolders"][0]["uri"] = pathlib.Path(
+            repository_absolute_path
+        ).as_uri()
 
         assert d["workspaceFolders"][0]["name"] == "$name"
         d["workspaceFolders"][0]["name"] = os.path.basename(repository_absolute_path)
@@ -148,11 +195,15 @@ class RustAnalyzer(LanguageServer):
         self.server.on_request("client/registerCapability", register_capability_handler)
         self.server.on_notification("language/status", lang_status_handler)
         self.server.on_notification("window/logMessage", window_log_message)
-        self.server.on_request("workspace/executeClientCommand", execute_client_command_handler)
+        self.server.on_request(
+            "workspace/executeClientCommand", execute_client_command_handler
+        )
         self.server.on_notification("$/progress", do_nothing)
         self.server.on_notification("textDocument/publishDiagnostics", do_nothing)
         self.server.on_notification("language/actionableNotification", do_nothing)
-        self.server.on_notification("experimental/serverStatus", check_experimental_status)
+        self.server.on_notification(
+            "experimental/serverStatus", check_experimental_status
+        )
 
         async with super().start_server():
             self.logger.log("Starting RustAnalyzer server process", logging.INFO)
