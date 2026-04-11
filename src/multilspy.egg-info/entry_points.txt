@@ -1,0 +1,2 @@
+[console_scripts]
+ra-lsp = multilspy_cli.cli:main
