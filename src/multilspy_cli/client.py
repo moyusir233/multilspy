@@ -218,6 +218,54 @@ class LSPClient:
         )
         return result.get("result", [])
 
+    def incoming_calls_recursive(
+        self, file_path: str, line: int, column: int, max_depth: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get recursive incoming calls to a function.
+
+        :param file_path: Relative path to the file
+        :param line: 1-based line number
+        :param column: 1-based column number
+        :param max_depth: Maximum recursion depth (default: 10)
+        :return: Dictionary with call hierarchy, keys are "name|uri|range",
+                 values contain "info" and "incoming_calls"
+        """
+        result = self._request(
+            "/incoming-calls-recursive",
+            {
+                "file_path": file_path,
+                "line": line,
+                "column": column,
+                "max_depth": max_depth
+            }
+        )
+        return result.get("result", {})
+
+    def outgoing_calls_recursive(
+        self, file_path: str, line: int, column: int, max_depth: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get recursive outgoing calls from a function.
+
+        :param file_path: Relative path to the file
+        :param line: 1-based line number
+        :param column: 1-based column number
+        :param max_depth: Maximum recursion depth (default: 10)
+        :return: Dictionary with call hierarchy, keys are "name|uri|range",
+                 values contain "info" and "outgoing_calls"
+        """
+        result = self._request(
+            "/outgoing-calls-recursive",
+            {
+                "file_path": file_path,
+                "line": line,
+                "column": column,
+                "max_depth": max_depth
+            }
+        )
+        return result.get("result", {})
+
 
 def start_server_command(daemon: bool = True) -> None:
     """

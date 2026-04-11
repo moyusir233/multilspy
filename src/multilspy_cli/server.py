@@ -30,6 +30,10 @@ from .position_utils import (
     convert_document_symbols_to_raw,
     convert_incoming_calls_to_raw,
     convert_outgoing_calls_to_raw,
+    get_call_hierarchy_key,
+    extract_call_hierarchy_item_info,
+    convert_call_hierarchy_item_to_raw,
+    convert_lsp_range_to_raw,
 )
 
 import logging
@@ -472,6 +476,258 @@ def create_app(manager: LSPManager) -> Quart:
 
             converted = convert_outgoing_calls_to_raw(result)
             return jsonify({"status": "ok", "result": converted})
+
+    @app.route("/incoming-calls-recursive", methods=["POST"])
+    async def incoming_calls_recursive():
+        data = await request.get_json(silent=True) or {}
+        project_path = data.get("project_path")
+        file_path = data.get("file_path")
+        line = data.get("line")
+        column = data.get("column")
+        max_depth = data.get("max_depth", 10)
+
+        if not all(
+            [
+                project_path is not None,
+                file_path is not None,
+                line is not None,
+                column is not None,
+            ]
+        ):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "project_path, file_path, line, and column are required",
+                }
+            ), 400
+
+        instance, _ = await manager.get_or_create_instance(project_path)
+        await instance.ready.wait()
+
+        async with instance.lock:
+            instance.last_used = time.time()
+            lsp_pos = raw_to_lsp_position(line, column)
+            prepare_result = await instance.lsp.request_prepare_call_hierarchy(
+                file_path, lsp_pos["line"], lsp_pos["character"]
+            )
+
+            if not prepare_result:
+                return jsonify({"status": "ok", "result": {}})
+
+            root_item = prepare_result[0]
+
+            # Recursive traversal function
+            async def traverse_incoming(
+                item: Dict[str, Any],
+                current_depth: int,
+                visited: set
+            ) -> Dict[str, Any]:
+                key = get_call_hierarchy_key(item)
+
+                if key in visited or current_depth > max_depth:
+                    return {}
+
+                visited.add(key)
+
+                # Convert and store the current item
+                converted_item = convert_call_hierarchy_item_to_raw(item)
+                item_info = extract_call_hierarchy_item_info(converted_item)
+
+                # Get incoming calls for this item
+                incoming_result = await instance.lsp.request_incoming_calls(file_path, item)
+
+                child_keys = []
+                result = {}
+
+                if incoming_result:
+                    for call in incoming_result:
+                        from_item = call.get("from", {})
+                        from_key = get_call_hierarchy_key(from_item)
+
+                        # Convert fromRanges
+                        from_ranges = call.get("fromRanges", [])
+                        converted_ranges = [convert_lsp_range_to_raw(r) for r in from_ranges]
+
+                        child_keys.append({
+                            "key": from_key,
+                            "fromRanges": converted_ranges
+                        })
+
+                        # Recursively traverse children
+                        child_result = await traverse_incoming(from_item, current_depth + 1, visited)
+                        result.update(child_result)
+
+                # Add current item to result
+                result[key] = {
+                    "info": item_info,
+                    "incoming_calls": child_keys
+                }
+
+                return result
+
+            # Start traversal from root item
+            visited: set = set()
+            root_key = get_call_hierarchy_key(root_item)
+            converted_root = convert_call_hierarchy_item_to_raw(root_item)
+            root_info = extract_call_hierarchy_item_info(converted_root)
+
+            # First get the root's incoming calls
+            root_incoming = await instance.lsp.request_incoming_calls(file_path, root_item)
+            root_child_keys = []
+
+            if root_incoming:
+                for call in root_incoming:
+                    from_item = call.get("from", {})
+                    from_key = get_call_hierarchy_key(from_item)
+                    from_ranges = call.get("fromRanges", [])
+                    converted_ranges = [convert_lsp_range_to_raw(r) for r in from_ranges]
+                    root_child_keys.append({
+                        "key": from_key,
+                        "fromRanges": converted_ranges
+                    })
+
+            # Build the result starting with root
+            final_result = {
+                root_key: {
+                    "info": root_info,
+                    "incoming_calls": root_child_keys
+                }
+            }
+
+            # Now traverse all children
+            if root_incoming:
+                for call in root_incoming:
+                    from_item = call.get("from", {})
+                    child_result = await traverse_incoming(from_item, 1, visited)
+                    final_result.update(child_result)
+
+            return jsonify({"status": "ok", "result": final_result})
+
+    @app.route("/outgoing-calls-recursive", methods=["POST"])
+    async def outgoing_calls_recursive():
+        data = await request.get_json(silent=True) or {}
+        project_path = data.get("project_path")
+        file_path = data.get("file_path")
+        line = data.get("line")
+        column = data.get("column")
+        max_depth = data.get("max_depth", 10)
+
+        if not all(
+            [
+                project_path is not None,
+                file_path is not None,
+                line is not None,
+                column is not None,
+            ]
+        ):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "project_path, file_path, line, and column are required",
+                }
+            ), 400
+
+        instance, _ = await manager.get_or_create_instance(project_path)
+        await instance.ready.wait()
+
+        async with instance.lock:
+            instance.last_used = time.time()
+            lsp_pos = raw_to_lsp_position(line, column)
+            prepare_result = await instance.lsp.request_prepare_call_hierarchy(
+                file_path, lsp_pos["line"], lsp_pos["character"]
+            )
+
+            if not prepare_result:
+                return jsonify({"status": "ok", "result": {}})
+
+            root_item = prepare_result[0]
+
+            # Recursive traversal function
+            async def traverse_outgoing(
+                item: Dict[str, Any],
+                current_depth: int,
+                visited: set
+            ) -> Dict[str, Any]:
+                key = get_call_hierarchy_key(item)
+
+                if key in visited or current_depth > max_depth:
+                    return {}
+
+                visited.add(key)
+
+                # Convert and store the current item
+                converted_item = convert_call_hierarchy_item_to_raw(item)
+                item_info = extract_call_hierarchy_item_info(converted_item)
+
+                # Get outgoing calls for this item
+                outgoing_result = await instance.lsp.request_outgoing_calls(file_path, item)
+
+                child_keys = []
+                result = {}
+
+                if outgoing_result:
+                    for call in outgoing_result:
+                        to_item = call.get("to", {})
+                        to_key = get_call_hierarchy_key(to_item)
+
+                        # Convert fromRanges
+                        from_ranges = call.get("fromRanges", [])
+                        converted_ranges = [convert_lsp_range_to_raw(r) for r in from_ranges]
+
+                        child_keys.append({
+                            "key": to_key,
+                            "fromRanges": converted_ranges
+                        })
+
+                        # Recursively traverse children
+                        child_result = await traverse_outgoing(to_item, current_depth + 1, visited)
+                        result.update(child_result)
+
+                # Add current item to result
+                result[key] = {
+                    "info": item_info,
+                    "outgoing_calls": child_keys
+                }
+
+                return result
+
+            # Start traversal from root item
+            visited: set = set()
+            root_key = get_call_hierarchy_key(root_item)
+            converted_root = convert_call_hierarchy_item_to_raw(root_item)
+            root_info = extract_call_hierarchy_item_info(converted_root)
+
+            # First get the root's outgoing calls
+            root_outgoing = await instance.lsp.request_outgoing_calls(file_path, root_item)
+            root_child_keys = []
+
+            if root_outgoing:
+                for call in root_outgoing:
+                    to_item = call.get("to", {})
+                    to_key = get_call_hierarchy_key(to_item)
+                    from_ranges = call.get("fromRanges", [])
+                    converted_ranges = [convert_lsp_range_to_raw(r) for r in from_ranges]
+                    root_child_keys.append({
+                        "key": to_key,
+                        "fromRanges": converted_ranges
+                    })
+
+            # Build the result starting with root
+            final_result = {
+                root_key: {
+                    "info": root_info,
+                    "outgoing_calls": root_child_keys
+                }
+            }
+
+            # Now traverse all children
+            if root_outgoing:
+                for call in root_outgoing:
+                    to_item = call.get("to", {})
+                    child_result = await traverse_outgoing(to_item, 1, visited)
+                    final_result.update(child_result)
+
+            return jsonify({"status": "ok", "result": final_result})
 
     return app
 

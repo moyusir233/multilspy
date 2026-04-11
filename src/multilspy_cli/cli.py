@@ -60,6 +60,12 @@ Examples:
   # Get all functions called by a function
   ra-lsp outgoing-calls src/lib.rs 42 10
 
+  # Get recursive incoming calls (with default max depth 10)
+  ra-lsp incoming-calls-recursive src/lib.rs 42 10
+
+  # Get recursive outgoing calls with custom max depth
+  ra-lsp outgoing-calls-recursive src/lib.rs 42 10 --max-depth 5
+
   # Shutdown the server
   ra-lsp server stop
 
@@ -69,7 +75,7 @@ Note: All line and column numbers are 1-based.
     parser.add_argument(
         "--project",
         "-p",
-        help="Path to the Rust project (default: current directory)",
+        help="Path to the Rust project root (default: current working directory)",
         default=None,
     )
 
@@ -169,6 +175,34 @@ Note: All line and column numbers are 1-based.
         description="Find all functions called by the target function",
     )
     add_position_args(outgoing_parser, "of the function")
+
+    # Incoming calls recursive
+    incoming_recursive_parser = subparsers.add_parser(
+        "incoming-calls-recursive",
+        help="Get recursive incoming calls to a function",
+        description="Find all functions that call the target function, recursively",
+    )
+    add_position_args(incoming_recursive_parser, "of the function")
+    incoming_recursive_parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=10,
+        help="Maximum recursion depth (default: 10)",
+    )
+
+    # Outgoing calls recursive
+    outgoing_recursive_parser = subparsers.add_parser(
+        "outgoing-calls-recursive",
+        help="Get recursive outgoing calls from a function",
+        description="Find all functions called by the target function, recursively",
+    )
+    add_position_args(outgoing_recursive_parser, "of the function")
+    outgoing_recursive_parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=10,
+        help="Maximum recursion depth (default: 10)",
+    )
 
     return parser
 
@@ -270,6 +304,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         elif args.command == "outgoing-calls":
             file_path = resolve_file_path(project_path, args.file)
             result = client.outgoing_calls(file_path, args.line, args.column)
+            print_json({"status": "ok", "result": result})
+
+        elif args.command == "incoming-calls-recursive":
+            file_path = resolve_file_path(project_path, args.file)
+            result = client.incoming_calls_recursive(
+                file_path, args.line, args.column, args.max_depth
+            )
+            print_json({"status": "ok", "result": result})
+
+        elif args.command == "outgoing-calls-recursive":
+            file_path = resolve_file_path(project_path, args.file)
+            result = client.outgoing_calls_recursive(
+                file_path, args.line, args.column, args.max_depth
+            )
             print_json({"status": "ok", "result": result})
 
     except LSPClientError as e:

@@ -11,7 +11,9 @@ from .position_utils import (
     convert_call_hierarchy_item_to_raw,
     convert_incoming_calls_to_raw,
     convert_outgoing_calls_to_raw,
-    convert_document_symbols_to_raw
+    convert_document_symbols_to_raw,
+    get_call_hierarchy_key,
+    extract_call_hierarchy_item_info,
 )
 from .client import LSPClient, LSPClientError
 from .server import (
@@ -35,6 +37,8 @@ __all__ = [
     "convert_incoming_calls_to_raw",
     "convert_outgoing_calls_to_raw",
     "convert_document_symbols_to_raw",
+    "get_call_hierarchy_key",
+    "extract_call_hierarchy_item_info",
     # Client
     "LSPClient",
     "LSPClientError",

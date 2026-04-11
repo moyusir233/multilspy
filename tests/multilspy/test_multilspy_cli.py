@@ -15,6 +15,8 @@ from multilspy_cli.position_utils import (
     convert_incoming_calls_to_raw,
     convert_outgoing_calls_to_raw,
     convert_document_symbols_to_raw,
+    get_call_hierarchy_key,
+    extract_call_hierarchy_item_info,
 )
 from multilspy_cli.server import LSPManager, create_app
 
@@ -223,6 +225,101 @@ class TestPositionUtils:
         assert result[0]["location"]["range"]["start"] == {"line": 1, "column": 1}
         assert result[0]["range"]["start"] == {"line": 1, "column": 1}
         assert result[0]["selectionRange"]["start"] == {"line": 1, "column": 5}
+
+    def test_get_call_hierarchy_key(self):
+        """Test generating unique key for CallHierarchyItem."""
+        item = {
+            "name": "test_function",
+            "uri": "file:///test.rs",
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 9, "character": 4},
+            },
+        }
+        key = get_call_hierarchy_key(item)
+        assert key == "test_function|file:///test.rs|0,0-9,4"
+
+        # Test with different range
+        item2 = {
+            "name": "test_function",
+            "uri": "file:///test.rs",
+            "range": {
+                "start": {"line": 10, "character": 5},
+                "end": {"line": 20, "character": 10},
+            },
+        }
+        key2 = get_call_hierarchy_key(item2)
+        assert key2 == "test_function|file:///test.rs|10,5-20,10"
+        assert key != key2
+
+        # Test with same name but different URI
+        item3 = {
+            "name": "test_function",
+            "uri": "file:///other.rs",
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 9, "character": 4},
+            },
+        }
+        key3 = get_call_hierarchy_key(item3)
+        assert key3 == "test_function|file:///other.rs|0,0-9,4"
+        assert key != key3
+
+    def test_extract_call_hierarchy_item_info(self):
+        """Test extracting info from CallHierarchyItem."""
+        item = {
+            "name": "test_function",
+            "kind": 12,
+            "tags": [1],
+            "detail": "fn test()",
+            "uri": "file:///test.rs",
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 9, "character": 4},
+            },
+            "selectionRange": {
+                "start": {"line": 0, "character": 4},
+                "end": {"line": 0, "character": 16},
+            },
+            "data": {"some": "data"},
+        }
+        info = extract_call_hierarchy_item_info(item)
+        assert info["kind"] == 12
+        assert info["tags"] == [1]
+        assert info["detail"] == "fn test()"
+        assert info["range"] == {
+            "start": {"line": 0, "character": 0},
+            "end": {"line": 9, "character": 4},
+        }
+        assert info["selectionRange"] == {
+            "start": {"line": 0, "character": 4},
+            "end": {"line": 0, "character": 16},
+        }
+        assert info["data"] == {"some": "data"}
+        # Name and uri should NOT be in the extracted info (they're in the key)
+        assert "name" not in info
+        assert "uri" not in info
+
+    def test_extract_call_hierarchy_item_info_minimal(self):
+        """Test extracting info from minimal CallHierarchyItem."""
+        item = {
+            "name": "test_function",
+            "kind": 12,
+            "uri": "file:///test.rs",
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 9, "character": 4},
+            },
+            "selectionRange": {
+                "start": {"line": 0, "character": 4},
+                "end": {"line": 0, "character": 16},
+            },
+        }
+        info = extract_call_hierarchy_item_info(item)
+        assert info["kind"] == 12
+        assert "tags" not in info
+        assert "detail" not in info
+        assert "data" not in info
 
 
 class TestCLIModule:
