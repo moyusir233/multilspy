@@ -12,5 +12,11 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
+tracing-subscriber = "0.3"
 multilspy-protocol = { path = "../multilspy-protocol" }
 multilspy-rust = { path = "../multilspy-rust" }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.0"
