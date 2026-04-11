@@ -69,7 +69,10 @@ Examples:
   # Shutdown the server
   ra-lsp server stop
 
-Note: All line and column numbers are 1-based.
+Note:
+- All line and column numbers are 1-based.
+- File paths must be relative to the project root directory.
+- By default, the current working directory is used as the project root.
         """,
     )
     parser.add_argument(
@@ -114,7 +117,10 @@ Note: All line and column numbers are 1-based.
 
     # LSP feature commands
     def add_position_args(parser: argparse.ArgumentParser, help_suffix: str) -> None:
-        parser.add_argument("file", help=f"Path to the Rust file {help_suffix}")
+        parser.add_argument(
+            "file",
+            help=f"Path to the Rust file {help_suffix} (relative to project root)",
+        )
         parser.add_argument("line", type=int, help=f"1-based line number {help_suffix}")
         parser.add_argument(
             "column", type=int, help=f"1-based column number {help_suffix}"
@@ -150,7 +156,10 @@ Note: All line and column numbers are 1-based.
         help="Get all symbols in a document",
         description="List all functions, structs, traits, and other symbols in a Rust file",
     )
-    doc_symbols_parser.add_argument("file", help="Path to the Rust file")
+    doc_symbols_parser.add_argument(
+        "file",
+        help="Path to the Rust file (relative to project root)",
+    )
 
     # Implementation
     impl_parser = subparsers.add_parser(
