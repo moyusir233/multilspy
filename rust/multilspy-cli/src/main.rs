@@ -2,6 +2,7 @@ use clap::Parser;
 use commands::server::ServerCommand;
 
 mod commands;
+mod daemon;
 mod error;
 
 use error::CliError;

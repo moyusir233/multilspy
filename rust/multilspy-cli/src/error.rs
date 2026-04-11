@@ -23,4 +23,7 @@ pub enum CliError {
 
     #[error("Command error: {0}")]
     Command(String),
+
+    #[error("Parse error: {0}")]
+    Parse(#[from] std::num::ParseIntError),
 }
