@@ -44,10 +44,8 @@ impl RecursiveCallHierarchy {
         }
 
         while let Some((item, depth)) = queue.pop_front() {
-            if let Some(max) = max_depth {
-                if depth >= max {
-                    continue;
-                }
+            if let Some(max) = max_depth && depth >= max {
+                continue;
             }
 
             let incoming_calls = self.client.incoming_calls(item.clone()).await?;
@@ -85,10 +83,8 @@ impl RecursiveCallHierarchy {
         }
 
         while let Some((item, depth)) = queue.pop_front() {
-            if let Some(max) = max_depth {
-                if depth >= max {
-                    continue;
-                }
+            if let Some(max) = max_depth && depth >= max {
+                continue;
             }
 
             let outgoing_calls = self.client.outgoing_calls(item.clone()).await?;
