@@ -5,6 +5,7 @@ mod commands;
 mod daemon;
 mod error;
 mod ipc;
+mod position_utils;
 
 use error::CliError;
 
