@@ -1,0 +1,16 @@
+[package]
+name = "multilspy-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+multilspy-protocol = { path = "../multilspy-protocol" }
+multilspy-rust = { path = "../multilspy-rust" }
