@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use thiserror::Error;
 use multilspy_rust::error::ServerError;
 
@@ -11,6 +13,9 @@ pub enum CliError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
 
     #[error("Invalid URI: {0}")]
     InvalidUri(String),

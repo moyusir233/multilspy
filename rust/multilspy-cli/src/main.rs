@@ -4,6 +4,7 @@ use commands::server::ServerCommand;
 mod commands;
 mod daemon;
 mod error;
+mod ipc;
 
 use error::CliError;
 
