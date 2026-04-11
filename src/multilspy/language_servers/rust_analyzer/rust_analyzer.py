@@ -207,6 +207,7 @@ class RustAnalyzer(LanguageServer):
             return
 
         async def check_experimental_status(params):
+            self.logger.log(f"LSP: window/experimentalStatus: {params}", logging.DEBUG)
             if (
                 params["quiescent"] == True
                 and len(self.uncomplete_work_done_progress) == 0
@@ -230,7 +231,7 @@ class RustAnalyzer(LanguageServer):
             ):
                 self.logger.log(
                     f"Received and save work done progress create request with token: {params['token']}",
-                    logging.INFO,
+                    logging.DEBUG,
                 )
                 self.uncomplete_work_done_progress.add(params["token"])
 
@@ -250,7 +251,7 @@ class RustAnalyzer(LanguageServer):
                 self.uncomplete_work_done_progress.remove(params["token"])
                 self.logger.log(
                     f"Received work done progress end notification with token: {params['token']}, remain uncomplete_work_done_progress: {self.uncomplete_work_done_progress}",
-                    logging.INFO,
+                    logging.DEBUG,
                 )
 
                 if (
@@ -265,6 +266,10 @@ class RustAnalyzer(LanguageServer):
         ):
             for i in range(1, num_epoch + 1):
                 await asyncio.sleep(sleep_time_secs_per_epoch)
+                self.logger.log(
+                    f"check server status, uncomplete_work_done_progress: {self.uncomplete_work_done_progress}",
+                    logging.DEBUG,
+                )
                 # 每次醒后，检查下是否可以直接ready
                 if (
                     time.time() >= self.wait_work_done_progress_create_max_time
@@ -272,7 +277,7 @@ class RustAnalyzer(LanguageServer):
                 ):
                     self.logger.log(
                         f"Server is ready after {i * sleep_time_secs_per_epoch} seconds",
-                        logging.INFO,
+                        logging.DEBUG,
                     )
                     self.server_ready.set()
                     return
@@ -335,12 +340,14 @@ class RustAnalyzer(LanguageServer):
             # 避免永久沉睡，设置固定20分钟的超时时间
             _task = asyncio.create_task(
                 check_status_and_set_ready(
-                    num_epoch=20,
-                    sleep_time_secs_per_epoch=60,
+                    num_epoch=40,
+                    sleep_time_secs_per_epoch=30,
                 )
             )
 
             await self.server_ready.wait()
+
+            self.logger.log("RustAnalyzer server is ready", logging.INFO)
 
             try:
                 yield self

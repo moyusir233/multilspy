@@ -187,6 +187,7 @@ class LanguageServerHandler:
         process_launch_info: ProcessLaunchInfo,
         logger=None,
         start_independent_lsp_process=True,
+        std_error_log_file: Optional[str] = None,
     ) -> None:
         """
         Params:
@@ -206,6 +207,7 @@ class LanguageServerHandler:
         self.on_request_handlers = {}
         self.on_notification_handlers = {}
         self.logger = logger
+        self.std_error_log_file = std_error_log_file
         self.tasks = {}
         self.task_counter = 0
         self.loop = None
@@ -225,6 +227,7 @@ class LanguageServerHandler:
             stderr=asyncio.subprocess.PIPE,
             env=child_proc_env,
             cwd=self.process_launch_info.cwd,
+            limit=1024 * 1024,
             start_new_session=self.start_independent_lsp_process,
         )
 
@@ -410,15 +413,34 @@ class LanguageServerHandler:
         Continuously read from the language server process stderr and log the messages
         """
         try:
-            while (
-                self.process
-                and self.process.stderr
-                and not self.process.stderr.at_eof()
-            ):
-                line = await self.process.stderr.readline()
-                if not line:
-                    continue
-                self._log("LSP stderr: " + line.decode(ENCODING, errors="replace"))
+            if self.std_error_log_file:
+                os.makedirs(os.path.dirname(self.std_error_log_file), exist_ok=True)
+
+                with open(self.std_error_log_file, "w") as f:
+                    i = 0
+                    while (
+                        self.process
+                        and self.process.stderr
+                        and not self.process.stderr.at_eof()
+                    ):
+                        line = await self.process.stderr.readline()
+                        if not line:
+                            continue
+                        f.write(line.decode(ENCODING, errors="replace"))
+
+                        if i % 100 == 0:
+                            f.flush()
+                        i += 1
+            else:
+                while (
+                    self.process
+                    and self.process.stderr
+                    and not self.process.stderr.at_eof()
+                ):
+                    line = await self.process.stderr.readline()
+                    if not line:
+                        continue
+                    self._log("LSP stderr: " + line.decode(ENCODING, errors="replace"))
         except (BrokenPipeError, ConnectionResetError, StopLoopException):
             pass
 

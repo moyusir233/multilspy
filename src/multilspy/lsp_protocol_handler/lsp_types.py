@@ -5399,7 +5399,9 @@ class MarkdownClientCapabilities(TypedDict):
 
 
 class __CodeActionClientCapabilities_codeActionLiteralSupport_Type_1(TypedDict):
-    codeActionKind: "__CodeActionClientCapabilities_codeActionLiteralSupport_codeActionKind_Type_1"
+    codeActionKind: (
+        "__CodeActionClientCapabilities_codeActionLiteralSupport_codeActionKind_Type_1"
+    )
     """ The code action kind is support with the following value
     set. """
 

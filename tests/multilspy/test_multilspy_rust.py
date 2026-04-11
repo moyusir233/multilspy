@@ -10,8 +10,16 @@ from multilspy.multilspy_config import Language
 from multilspy.multilspy_types import Position, CompletionItemKind
 from tests.test_utils import create_test_context
 from pathlib import PurePath
+from multilspy.multilspy_config import MultilspyConfig
+from multilspy.multilspy_logger import MultilspyLogger
+
+
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 pytest_plugins = ("pytest_asyncio",)
+
 
 @pytest.mark.asyncio
 async def test_multilspy_rust_carbonyl():
@@ -22,16 +30,20 @@ async def test_multilspy_rust_carbonyl():
     params = {
         "code_language": code_language,
         "repo_url": "https://github.com/fathyb/carbonyl/",
-        "repo_commit": "ab80a276b1bd1c2c8dcefc8f248415dfc61dc2bf"
+        "repo_commit": "ab80a276b1bd1c2c8dcefc8f248415dfc61dc2bf",
     }
     with create_test_context(params) as context:
-        lsp = LanguageServer.create(context.config, context.logger, context.source_directory)
+        lsp = LanguageServer.create(
+            context.config, context.logger, context.source_directory
+        )
 
         # All the communication with the language server must be performed inside the context manager
         # The server process is started when the context manager is entered and is terminated when the context manager is exited.
         # The context manager is an asynchronous context manager, so it must be used with async with.
         async with lsp.start_server():
-            result = await lsp.request_definition(str(PurePath("src/browser/bridge.rs")), 132, 18)
+            result = await lsp.request_definition(
+                str(PurePath("src/browser/bridge.rs")), 132, 18
+            )
 
             assert isinstance(result, list)
             assert len(result) == 1
@@ -42,7 +54,9 @@ async def test_multilspy_rust_carbonyl():
                 "end": {"line": 43, "character": 19},
             }
 
-            result = await lsp.request_references(str(PurePath("src/input/tty.rs")), 43, 15)
+            result = await lsp.request_references(
+                str(PurePath("src/input/tty.rs")), 43, 15
+            )
 
             assert isinstance(result, list)
             assert len(result) == 2
@@ -77,17 +91,22 @@ async def test_multilspy_rust_carbonyl():
             assert isinstance(result, list)
             assert len(result) == 1
 
-            assert result == [{
-                'name': 'parse_or_run',
-                'kind': 12,
-                'location': {
-                    'uri': PurePath(context.source_directory, "src/cli/program.rs").as_uri(),
-                    'range': {
-                        'start': {'line': 10, 'character': 4},
-                        'end': {'line': 24, 'character': 5}
-                    }
+            assert result == [
+                {
+                    "name": "parse_or_run",
+                    "kind": 12,
+                    "location": {
+                        "uri": PurePath(
+                            context.source_directory, "src/cli/program.rs"
+                        ).as_uri(),
+                        "range": {
+                            "start": {"line": 10, "character": 4},
+                            "end": {"line": 24, "character": 5},
+                        },
+                    },
                 }
-            }]
+            ]
+
 
 @pytest.mark.asyncio
 async def test_multilspy_rust_completions_mediaplayer() -> None:
@@ -102,14 +121,18 @@ async def test_multilspy_rust_completions_mediaplayer() -> None:
     }
 
     with create_test_context(params) as context:
-        lsp = LanguageServer.create(context.config, context.logger, context.source_directory)
+        lsp = LanguageServer.create(
+            context.config, context.logger, context.source_directory
+        )
         filepath = "src/playlist.rs"
         # All the communication with the language server must be performed inside the context manager
         # The server process is started when the context manager is entered and is terminated when the context manager is exited.
         async with lsp.start_server():
             with lsp.open_file(filepath):
                 deleted_text = lsp.delete_text_between_positions(
-                    filepath, Position(line=10, character=40), Position(line=12, character=4)
+                    filepath,
+                    Position(line=10, character=40),
+                    Position(line=12, character=4),
                 )
                 assert (
                     deleted_text
@@ -118,11 +141,81 @@ async def test_multilspy_rust_completions_mediaplayer() -> None:
     """
                 )
 
-                response = await lsp.request_completions(filepath, 10, 40, allow_incomplete=True)
+                response = await lsp.request_completions(
+                    filepath, 10, 40, allow_incomplete=True
+                )
 
-                response = [item for item in response if item['kind'] != CompletionItemKind.Snippet]
+                response = [
+                    item
+                    for item in response
+                    if item["kind"] != CompletionItemKind.Snippet
+                ]
 
                 for item in response:
-                    item['completionText'] = item['completionText'][:item['completionText'].find('(')]
-                
-                assert set([item['completionText'] for item in response]) == {'reset', 'into', 'try_into', 'prepare'}
+                    item["completionText"] = item["completionText"][
+                        : item["completionText"].find("(")
+                    ]
+
+                assert set([item["completionText"] for item in response]) == {
+                    "reset",
+                    "into",
+                    "try_into",
+                    "prepare",
+                }
+
+
+@pytest.mark.asyncio
+async def test_multilspy_rust_call_hierarchy() -> None:
+    config = MultilspyConfig.from_dict(
+        {
+            "code_language": "rust",
+            "trace_lsp_communication": False,
+            "std_error_log_file": "/tmp/test-lsp-rust-analyzer.log",
+        }
+    )  # Also supports "python", "rust", "csharp", "typescript", "javascript", "go", "dart", "ruby"
+    logger = MultilspyLogger()
+    lsp = LanguageServer.create(
+        config, logger, "/home/yangchengrun/lark-client/rust-sdk"
+    )
+    async with lsp.start_server():
+        print("request_definition")
+        definition = await lsp.request_definition(
+            "chat/chat-modules/chat-chats/src/services/chats.rs",
+            2092,
+            4,
+        )
+        print(definition)
+
+        print("request_document_symbols")
+        result = await lsp.request_document_symbols(
+            "chat/chat-modules/chat-chats/src/services/chats.rs"
+        )
+
+        for symbol in result[0]:
+            if symbol["name"].strip() == "preload_chat_by_trigger":
+                print(symbol)
+                range_ = symbol["selectionRange"]
+
+                print("request_prepare_call_hierarchy")
+                call_hierarchy_list = await lsp.request_prepare_call_hierarchy(
+                    "chat/chat-modules/chat-chats/src/services/chats.rs",
+                    range_["start"]["line"],
+                    range_["start"]["character"],
+                )
+                print(call_hierarchy_list)
+
+                call_hierarchy_item = call_hierarchy_list[0]
+
+                print("request_incoming_calls")
+                incoming_calls = await lsp.request_incoming_calls(
+                    "chat/chat-modules/chat-chats/src/services/chats.rs",
+                    call_hierarchy_item,
+                )
+                print(incoming_calls)
+
+                print("request_outgoing_calls")
+                outgoing_calls = await lsp.request_outgoing_calls(
+                    "chat/chat-modules/chat-chats/src/services/chats.rs",
+                    call_hierarchy_item,
+                )
+                print(outgoing_calls)

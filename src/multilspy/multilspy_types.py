@@ -3,6 +3,7 @@ Defines wrapper objects around the types returned by LSP to ensure decoupling be
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 
 from enum import IntEnum, Enum
 from typing_extensions import NotRequired, TypedDict, List, Dict, Union
@@ -11,6 +12,7 @@ URI = str
 DocumentUri = str
 Uint = int
 RegExp = str
+
 
 class Position(TypedDict):
     """Position in a text document expressed as zero-based line and character
@@ -84,6 +86,7 @@ class Location(TypedDict):
     absolutePath: str
     relativePath: Union[str, None]
 
+
 class CompletionItemKind(IntEnum):
     """The kind of a completion entry."""
 
@@ -113,6 +116,7 @@ class CompletionItemKind(IntEnum):
     Operator = 24
     TypeParameter = 25
 
+
 class CompletionItem(TypedDict):
     """A completion item represents a text snippet that is
     proposed to complete text that is being typed."""
@@ -130,6 +134,7 @@ class CompletionItem(TypedDict):
     detail: NotRequired[str]
     """ A human-readable string with additional information
     about this item, like type or symbol information. """
+
 
 class SymbolKind(IntEnum):
     """A symbol kind."""
@@ -161,6 +166,7 @@ class SymbolKind(IntEnum):
     Operator = 25
     TypeParameter = 26
 
+
 class SymbolTag(IntEnum):
     """Symbol tags are extra annotations that tweak the rendering of a symbol.
 
@@ -168,6 +174,7 @@ class SymbolTag(IntEnum):
 
     Deprecated = 1
     """ Render a symbol as obsolete, usually using a strike-out. """
+
 
 class UnifiedSymbolInformation(TypedDict):
     """Represents information about programming constructs like variables, classes,
@@ -203,7 +210,7 @@ class UnifiedSymbolInformation(TypedDict):
 
     detail: NotRequired[str]
     """ More detail for this symbol, e.g the signature of a function. """
-    
+
     range: NotRequired[Range]
     """ The range enclosing this symbol not including leading/trailing whitespace but everything else
     like comments. This information is typically used to determine if the clients cursor is
@@ -212,7 +219,9 @@ class UnifiedSymbolInformation(TypedDict):
     """ The range that should be selected and revealed when this symbol is being picked, e.g the name of a function.
     Must be contained by the `range`. """
 
-TreeRepr = Dict[int, List['TreeRepr']]
+
+TreeRepr = Dict[int, List["TreeRepr"]]
+
 
 class MarkupKind(Enum):
     """Describes the content type that a client supports in various
@@ -226,9 +235,11 @@ class MarkupKind(Enum):
     Markdown = "markdown"
     """ Markdown is supported as a content format """
 
+
 class __MarkedString_Type_1(TypedDict):
     language: str
     value: str
+
 
 MarkedString = Union[str, "__MarkedString_Type_1"]
 """ MarkedString can be used to render human readable text. It is either a markdown string
@@ -243,6 +254,7 @@ ${value}
 
 Note that markdown strings will be sanitized - that means html will be escaped.
 @deprecated use MarkupContent instead. """
+
 
 class MarkupContent(TypedDict):
     """A `MarkupContent` literal represents a string value which content is interpreted base on its
@@ -273,6 +285,7 @@ class MarkupContent(TypedDict):
     value: str
     """ The content itself """
 
+
 class Hover(TypedDict):
     """The result of a hover request."""
 
@@ -281,3 +294,52 @@ class Hover(TypedDict):
     range: NotRequired["Range"]
     """ An optional range inside the text document that is used to
     visualize the hover, e.g. by changing the background color. """
+
+@dataclass(frozen=True)
+class CallHierarchyItem(TypedDict):
+    """Represents a call hierarchy item return from prepareCallHierarchy request."""
+
+    name: str
+    """ The name of this symbol. """
+    kind: SymbolKind
+    """ The kind of this symbol. """
+    tags: NotRequired[List[SymbolTag]]
+    """ Tags for this symbol. """
+    detail: NotRequired[str]
+    """ A human-readable string with additional information
+    about this item, like type or symbol information. """
+    uri: DocumentUri
+    """ The resource identifier of this item."""
+    range: Range
+    """ The range enclosing this symbol not including leading/trailing whitespace but everything else
+    like comments. This information is typically used to determine if the clients cursor is
+    inside the symbol to reveal in the symbol in the UI. """
+    selectionRange: Range
+    """ The range that should be selected and revealed when this symbol is being picked, e.g the name of a function.
+    Must be contained by the `range`. """
+    data: NotRequired[object]
+    """ A data entry field that is preserved between a call hierarchy prepare and incoming calls or outgoing calls requests."""
+
+
+CallHierarchyIncomingCall = TypedDict(
+    "CallHierarchyIncomingCall",
+    {
+        # The item that makes the call.
+        "from": "CallHierarchyItem",
+        # The ranges at which the calls appear. This is relative to the caller
+        # denoted by {@link CallHierarchyIncomingCall.from `this.from`}.
+        "fromRanges": List["Range"],
+    },
+)
+
+
+class CallHierarchyOutgoingCall(TypedDict):
+    """Represents an outgoing call, e.g. calling a getter from a method or a method from a constructor etc.
+
+    @since 3.16.0"""
+
+    to: CallHierarchyItem
+    """ The item that is called."""
+
+    fromRanges: List[Range]
+    """ The range at which this item is called. This is the range relative to the caller."""

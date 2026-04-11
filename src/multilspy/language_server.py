@@ -18,6 +18,9 @@ from .lsp_protocol_handler.lsp_constants import LSPConstants
 from .lsp_protocol_handler import lsp_types as LSPTypes
 
 from . import multilspy_types
+from .lsp_protocol_handler import lsp_types
+
+
 from .multilspy_logger import MultilspyLogger
 from .lsp_protocol_handler.server import (
     LanguageServerHandler,
@@ -184,6 +187,7 @@ class LanguageServer:
             process_launch_info,
             logger=logging_fn,
             start_independent_lsp_process=config.start_independent_lsp_process,
+            std_error_log_file=config.std_error_log_file,
         )
 
         self.language_id = language_id
@@ -773,6 +777,183 @@ class LanguageServer:
 
         return ret
 
+    async def request_prepare_call_hierarchy(
+        self, relative_file_path: str, line: int, column: int
+    ) -> Union[List[multilspy_types.CallHierarchyItem], None]:
+        """
+        reference: [textDocument/definition](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_prepareCallHierarchy)
+
+        The call hierarchy request is sent from the client to the server to return a call hierarchy for the language element of given text document positions. The call hierarchy requests are executed in two steps:
+        1. first a call hierarchy item is resolved for the given text document position
+        2. for a call hierarchy item the incoming or outgoing call hierarchy items are resolved.
+
+        :param relative_file_path: The relative path of the file that has the symbol for which definition should be looked up
+        :param line: The line number of the symbol
+        :param column: The column number of the symbol
+
+        :return List[multilspy_types.Location]: A list of locations where the symbol is defined
+        """
+
+        if not self.server_started:
+            self.logger.log(
+                "request_prepare_call_hierarchy called before Language Server started",
+                logging.ERROR,
+            )
+            raise MultilspyException("Language Server not started")
+
+        with self.open_file(relative_file_path):
+            # sending request to the language server and waiting for response
+            response = await self.server.send.prepare_call_hierarchy(
+                {
+                    "textDocument": {
+                        "uri": pathlib.Path(
+                            str(PurePath(self.repository_root_path, relative_file_path))
+                        ).as_uri()
+                    },
+                    "position": {
+                        "line": line,
+                        "character": column,
+                    },
+                }
+            )
+
+        if response is None:
+            return None
+
+        if isinstance(response, list):
+            respose_list = response
+        elif isinstance(response, dict):
+            respose_list = [response]
+        else:
+            assert False, f"Unexpected response from Language Server: {response}"
+
+        ret: List[multilspy_types.CallHierarchyItem] = []
+        for resp_item in respose_list:
+            assert isinstance(resp_item, dict)
+
+            assert LSPConstants.NAME in resp_item
+            assert LSPConstants.KIND in resp_item
+            assert LSPConstants.URI in resp_item
+            assert LSPConstants.RANGE in resp_item
+            assert LSPConstants.SELECTION_RANGE in resp_item
+
+            ret.append(multilspy_types.CallHierarchyItem(**resp_item))
+
+        return ret
+
+    async def request_incoming_calls(
+        self, relative_file_path: str, item: multilspy_types.CallHierarchyItem
+    ) -> Union[List[multilspy_types.CallHierarchyIncomingCall], None]:
+        """
+        Raise a [callHierarchy/incomingCalls](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_incomingCalls) request to the Language Server
+        to resolve the incoming calls for a given `CallHierarchyItem`. Wait for the response and return the result.
+
+        :param item: The call hierarchy item for which to resolve incoming calls
+
+        :return Union[List[multilspy_types.CallHierarchyIncomingCall], None]: A list of incoming calls, or None if no calls are found
+        """
+
+        if not self.server_started:
+            self.logger.log(
+                "request_incoming_calls called before Language Server started",
+                logging.ERROR,
+            )
+            raise MultilspyException("Language Server not started")
+
+        # sending request to the language server and waiting for response
+        with self.open_file(relative_file_path):
+            param: lsp_types.CallHierarchyIncomingCallsParams = {
+                "item": {
+                    "name": item["name"],
+                    "kind": item["kind"],
+                    "uri": item["uri"],
+                    "range": item["range"],
+                    "selectionRange": item["selectionRange"],
+                },
+            }
+
+            for not_required_field in ["tags", "detail", "data"]:
+                field = item.get(not_required_field)
+                if field is not None:
+                    param["item"][not_required_field] = field
+
+            self.logger.log(f"request_incoming_calls params: {param}", logging.INFO)
+
+            response = await self.server.send.incoming_calls(param)
+
+        if response is None:
+            return None
+
+        assert isinstance(response, list), (
+            f"Unexpected response from Language Server: {response}"
+        )
+
+        ret: List[multilspy_types.CallHierarchyIncomingCall] = []
+        for resp_item in response:
+            assert isinstance(resp_item, dict)
+            assert "from" in resp_item
+            assert "fromRanges" in resp_item
+
+            ret.append(multilspy_types.CallHierarchyIncomingCall(**resp_item))
+
+        return ret
+
+    async def request_outgoing_calls(
+        self, relative_file_path: str, item: multilspy_types.CallHierarchyItem
+    ) -> Union[List[multilspy_types.CallHierarchyOutgoingCall], None]:
+        """
+        Raise a [callHierarchy/outgoingCalls](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_outgoingCalls) request to the Language Server
+        to resolve the outgoing calls for a given `CallHierarchyItem`. Wait for the response and return the result.
+
+        :param item: The call hierarchy item for which to resolve outgoing calls
+
+        :return Union[List[multilspy_types.CallHierarchyOutgoingCall], None]: A list of outgoing calls, or None if no calls are found
+        """
+
+        if not self.server_started:
+            self.logger.log(
+                "request_outgoing_calls called before Language Server started",
+                logging.ERROR,
+            )
+            raise MultilspyException("Language Server not started")
+
+        # sending request to the language server and waiting for response
+        with self.open_file(relative_file_path):
+            param: lsp_types.CallHierarchyOutgoingCallsParams = {
+                "item": {
+                    "name": item["name"],
+                    "kind": item["kind"],
+                    "uri": item["uri"],
+                    "range": item["range"],
+                    "selectionRange": item["selectionRange"],
+                },
+            }
+
+            for not_required_field in ["tags", "detail", "data"]:
+                field = item.get(not_required_field)
+                if field is not None:
+                    param["item"][not_required_field] = field
+
+            self.logger.log(f"request_outgoing_calls params: {param}", logging.INFO)
+
+            response = await self.server.send.outgoing_calls(param)
+
+        if response is None:
+            return None
+
+        assert isinstance(response, list), (
+            f"Unexpected response from Language Server: {response}"
+        )
+
+        ret: List[multilspy_types.CallHierarchyOutgoingCall] = []
+        for resp_item in response:
+            assert isinstance(resp_item, dict)
+            assert "to" in resp_item
+            assert "fromRanges" in resp_item
+            ret.append(multilspy_types.CallHierarchyOutgoingCall(**resp_item))
+
+        return ret
+
 
 @ensure_all_methods_implemented(LanguageServer)
 class SyncLanguageServer:
@@ -990,5 +1171,60 @@ class SyncLanguageServer:
         """
         result = asyncio.run_coroutine_threadsafe(
             self.language_server.request_workspace_symbol(query), self.loop
+        ).result(timeout=self.timeout)
+        return result
+
+    async def request_prepare_call_hierarchy(
+        self, relative_file_path: str, line: int, column: int
+    ) -> Union[List[multilspy_types.CallHierarchyItem], None]:
+        """
+        Raise a [textDocument/prepareCallHierarchy](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_prepareCallHierarchy) request to the Language Server
+        to find the call hierarchy at the given line and column in the given file. Wait for the response and return the result.
+
+        :param relative_file_path: The relative path of the file that has the call hierarchy
+        :param line: The line number of the symbol
+        :param column: The column number of the symbol
+
+        :return Union[List[multilspy_types.CallHierarchyItem], None]: A list of call hierarchy items
+        """
+        result = asyncio.run_coroutine_threadsafe(
+            self.language_server.request_prepare_call_hierarchy(
+                relative_file_path, line, column
+            ),
+            self.loop,
+        ).result(timeout=self.timeout)
+        return result
+
+    def request_incoming_calls(
+        self, item: multilspy_types.CallHierarchyItem
+    ) -> Union[List[multilspy_types.CallHierarchyIncomingCall], None]:
+        """
+        Raise a [callHierarchy/incomingCalls](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_incomingCalls) request to the Language Server
+        to resolve the incoming calls for a given `CallHierarchyItem`. Wait for the response and return the result.
+
+        :param item: The call hierarchy item for which to resolve incoming calls
+
+        :return Union[List[multilspy_types.CallHierarchyIncomingCall], None]: A list of incoming calls, or None if no calls are found
+        """
+        result = asyncio.run_coroutine_threadsafe(
+            self.language_server.request_incoming_calls(item),
+            self.loop,
+        ).result(timeout=self.timeout)
+        return result
+
+    def request_outgoing_calls(
+        self, item: multilspy_types.CallHierarchyItem
+    ) -> Union[List[multilspy_types.CallHierarchyOutgoingCall], None]:
+        """
+        Raise a [callHierarchy/outgoingCalls](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_outgoingCalls) request to the Language Server
+        to resolve the outgoing calls for a given `CallHierarchyItem`. Wait for the response and return the result.
+
+        :param item: The call hierarchy item for which to resolve outgoing calls
+
+        :return Union[List[multilspy_types.CallHierarchyOutgoingCall], None]: A list of outgoing calls, or None if no calls are found
+        """
+        result = asyncio.run_coroutine_threadsafe(
+            self.language_server.request_outgoing_calls(item),
+            self.loop,
         ).result(timeout=self.timeout)
         return result

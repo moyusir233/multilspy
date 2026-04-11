@@ -2,6 +2,7 @@
 This module contains constants used in the LSP protocol.
 """
 
+
 class LSPConstants:
     """
     This class contains constants used in the LSP protocol.
@@ -12,6 +13,10 @@ class LSPConstants:
 
     # the key for range, which is a from and to position within a text document
     RANGE = "range"
+
+    # the key for selection range, which is a from and to position within a text document
+    # that is selected by the user
+    SELECTION_RANGE = "selectionRange"
 
     # A key used in LocationLink type, used as the span of the origin link
     ORIGIN_SELECTION_RANGE = "originSelectionRange"
@@ -60,3 +65,6 @@ class LSPConstants:
 
     # key used to represent the location in symbols
     LOCATION = "location"
+
+    # key used to represent the detail of symbols
+    DETAIL = "detail"
