@@ -27,7 +27,12 @@ class ClangdLanguageServer(LanguageServer):
     Also make sure compile_commands.json is created at root of the source directory. Check clangd test case for example.
     """
 
-    def __init__(self, config: MultilspyConfig, logger: MultilspyLogger, repository_root_path: str):
+    def __init__(
+        self,
+        config: MultilspyConfig,
+        logger: MultilspyLogger,
+        repository_root_path: str,
+    ):
         """
         Creates a ClangdLanguageServer instance. This class is not meant to be instantiated directly. Use LanguageServer.create() instead.
         """
@@ -41,13 +46,17 @@ class ClangdLanguageServer(LanguageServer):
         )
         self.server_ready = asyncio.Event()
 
-    def setup_runtime_dependencies(self, logger: MultilspyLogger, config: MultilspyConfig) -> str:
+    def setup_runtime_dependencies(
+        self, logger: MultilspyLogger, config: MultilspyConfig
+    ) -> str:
         """
         Setup runtime dependencies for ClangdLanguageServer.
         """
         platform_id = PlatformUtils.get_platform_id()
 
-        with open(os.path.join(os.path.dirname(__file__), "runtime_dependencies.json"), "r") as f:
+        with open(
+            os.path.join(os.path.dirname(__file__), "runtime_dependencies.json"), "r"
+        ) as f:
             d = json.load(f)
             del d["_description"]
 
@@ -59,16 +68,29 @@ class ClangdLanguageServer(LanguageServer):
 
         runtime_dependencies = d["runtimeDependencies"]
         runtime_dependencies = [
-            dependency for dependency in runtime_dependencies if dependency["platformId"] == platform_id.value
+            dependency
+            for dependency in runtime_dependencies
+            if dependency["platformId"] == platform_id.value
         ]
         assert len(runtime_dependencies) == 1
         # Select dependency matching the current platform
-        dependency = next((dep for dep in runtime_dependencies if dep["platformId"] == platform_id.value), None)
+        dependency = next(
+            (
+                dep
+                for dep in runtime_dependencies
+                if dep["platformId"] == platform_id.value
+            ),
+            None,
+        )
         if dependency is None:
-            raise RuntimeError(f"No runtime dependency found for platform {platform_id.value}")
+            raise RuntimeError(
+                f"No runtime dependency found for platform {platform_id.value}"
+            )
 
         clangd_ls_dir = os.path.join(os.path.dirname(__file__), "static", "clangd")
-        clangd_executable_path = os.path.join(clangd_ls_dir, "clangd_19.1.2", "bin", dependency["binaryName"])
+        clangd_executable_path = os.path.join(
+            clangd_ls_dir, "clangd_19.1.2", "bin", dependency["binaryName"]
+        )
         if not os.path.exists(clangd_executable_path):
             os.makedirs(clangd_ls_dir, exist_ok=True)
             if dependency["archiveType"] == "zip":
@@ -76,9 +98,13 @@ class ClangdLanguageServer(LanguageServer):
                     logger, dependency["url"], clangd_ls_dir, dependency["archiveType"]
                 )
             else:
-                raise RuntimeError(f"Unsupported archive type: {dependency['archiveType']}")
+                raise RuntimeError(
+                    f"Unsupported archive type: {dependency['archiveType']}"
+                )
             if not os.path.exists(clangd_executable_path):
-                raise FileNotFoundError(f"clangd executable was not found at {clangd_executable_path} after extraction")
+                raise FileNotFoundError(
+                    f"clangd executable was not found at {clangd_executable_path} after extraction"
+                )
         os.chmod(clangd_executable_path, stat.S_IEXEC)
 
         return clangd_executable_path
@@ -87,7 +113,9 @@ class ClangdLanguageServer(LanguageServer):
         """
         Returns the initialize params for the clangd Language Server.
         """
-        with open(os.path.join(os.path.dirname(__file__), "initialize_params.json"), "r") as f:
+        with open(
+            os.path.join(os.path.dirname(__file__), "initialize_params.json"), "r"
+        ) as f:
             d = json.load(f)
 
         del d["_description"]
@@ -100,7 +128,9 @@ class ClangdLanguageServer(LanguageServer):
         d["rootUri"] = pathlib.Path(repository_absolute_path).as_uri()
 
         assert d["workspaceFolders"][0]["uri"] == "$uri"
-        d["workspaceFolders"][0]["uri"] = pathlib.Path(repository_absolute_path).as_uri()
+        d["workspaceFolders"][0]["uri"] = pathlib.Path(
+            repository_absolute_path
+        ).as_uri()
 
         assert d["workspaceFolders"][0]["name"] == "$name"
         d["workspaceFolders"][0]["name"] = os.path.basename(repository_absolute_path)
@@ -121,6 +151,7 @@ class ClangdLanguageServer(LanguageServer):
             # Shutdown the LanguageServer on exit from scope
         # LanguageServer has been shutdown
         """
+
         async def register_capability_handler(params):
             assert "registrations" in params
             for registration in params["registrations"]:
@@ -134,7 +165,7 @@ class ClangdLanguageServer(LanguageServer):
             # server -> client: {'jsonrpc': '2.0', 'method': 'language/status', 'params': {'type': 'ProjectStatus', 'message': 'OK'}}
             # Before proceeding?
             if params["type"] == "ServiceReady" and params["message"] == "ServiceReady":
-                self.service_ready_event.set()
+                self.server_ready.set()
 
         async def execute_client_command_handler(params):
             return []
@@ -152,11 +183,15 @@ class ClangdLanguageServer(LanguageServer):
         self.server.on_request("client/registerCapability", register_capability_handler)
         self.server.on_notification("language/status", lang_status_handler)
         self.server.on_notification("window/logMessage", window_log_message)
-        self.server.on_request("workspace/executeClientCommand", execute_client_command_handler)
+        self.server.on_request(
+            "workspace/executeClientCommand", execute_client_command_handler
+        )
         self.server.on_notification("$/progress", do_nothing)
         self.server.on_notification("textDocument/publishDiagnostics", do_nothing)
         self.server.on_notification("language/actionableNotification", do_nothing)
-        self.server.on_notification("experimental/serverStatus", check_experimental_status)
+        self.server.on_notification(
+            "experimental/serverStatus", check_experimental_status
+        )
 
         async with super().start_server():
             self.logger.log("Starting Clangd server process", logging.INFO)
@@ -169,9 +204,9 @@ class ClangdLanguageServer(LanguageServer):
             )
             init_response = await self.server.send.initialize(initialize_params)
             assert init_response["capabilities"]["textDocumentSync"]["change"] == 2
-            assert "completionProvider" in init_response["capabilities"]          
+            assert "completionProvider" in init_response["capabilities"]
             assert init_response["capabilities"]["completionProvider"] == {
-                "triggerCharacters": ['.', '<', '>', ':', '"', '/', '*'],
+                "triggerCharacters": [".", "<", ">", ":", '"', "/", "*"],
                 "resolveProvider": False,
             }
 

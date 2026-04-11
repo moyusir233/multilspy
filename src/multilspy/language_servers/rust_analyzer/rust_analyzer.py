@@ -45,7 +45,6 @@ class RustAnalyzer(LanguageServer):
             ),
             "rust",
         )
-        self.server_ready = asyncio.Event()
         self.wait_work_done_progress_create_max_time: float = 0.0
         self.uncomplete_work_done_progress: set[str] = set()
 
@@ -198,7 +197,7 @@ class RustAnalyzer(LanguageServer):
             # server -> client: {'jsonrpc': '2.0', 'method': 'language/status', 'params': {'type': 'ProjectStatus', 'message': 'OK'}}
             # Before proceeding?
             if params["type"] == "ServiceReady" and params["message"] == "ServiceReady":
-                self.service_ready_event.set()
+                self.server_ready.set()
 
         async def execute_client_command_handler(params):
             return []

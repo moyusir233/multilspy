@@ -133,9 +133,6 @@ class LanguageServer:
 
             return ClangdLanguageServer(config, logger, repository_root_path)
         else:
-            logger.log(
-                f"Language {config.code_language} is not supported", logging.ERROR
-            )
             raise MultilspyException(
                 f"Language {config.code_language} is not supported"
             )
@@ -167,7 +164,7 @@ class LanguageServer:
             )
 
         self.logger = logger
-        self.server_started = False
+        self.server_ready = asyncio.Event()
         self.repository_root_path: str = repository_root_path
         self.completions_available = asyncio.Event()
 
@@ -210,27 +207,21 @@ class LanguageServer:
         # LanguageServer has been shutdown
         ```
         """
-        self.server_started = True
         try:
             yield self
         finally:
-            self.server_started = False
+            pass
 
     # TODO: Add support for more LSP features
 
-    @contextmanager
-    def open_file(self, relative_file_path: str) -> Iterator[None]:
+    @asynccontextmanager
+    async def open_file(self, relative_file_path: str) -> AsyncIterator[None]:
         """
         Open a file in the Language Server. This is required before making any requests to the Language Server.
 
         :param relative_file_path: The relative path of the file to open.
         """
-        if not self.server_started:
-            self.logger.log(
-                "open_file called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
         absolute_file_path = str(
             PurePath(self.repository_root_path, relative_file_path)
@@ -275,7 +266,7 @@ class LanguageServer:
                 )
                 del self.open_file_buffers[uri]
 
-    def insert_text_at_position(
+    async def insert_text_at_position(
         self, relative_file_path: str, line: int, column: int, text_to_be_inserted: str
     ) -> multilspy_types.Position:
         """
@@ -287,12 +278,7 @@ class LanguageServer:
         :param column: The column number at which text should be inserted.
         :param text_to_be_inserted: The text to insert.
         """
-        if not self.server_started:
-            self.logger.log(
-                "insert_text_at_position called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
         absolute_file_path = str(
             PurePath(self.repository_root_path, relative_file_path)
@@ -334,7 +320,7 @@ class LanguageServer:
         )
         return multilspy_types.Position(line=new_l, character=new_c)
 
-    def delete_text_between_positions(
+    async def delete_text_between_positions(
         self,
         relative_file_path: str,
         start: multilspy_types.Position,
@@ -343,12 +329,7 @@ class LanguageServer:
         """
         Delete text between the given start and end positions in the given file and return the deleted text.
         """
-        if not self.server_started:
-            self.logger.log(
-                "insert_text_at_position called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
         absolute_file_path = str(
             PurePath(self.repository_root_path, relative_file_path)
@@ -383,18 +364,13 @@ class LanguageServer:
         )
         return deleted_text
 
-    def get_open_file_text(self, relative_file_path: str) -> str:
+    async def get_open_file_text(self, relative_file_path: str) -> str:
         """
         Get the contents of the given opened file as per the Language Server.
 
         :param relative_file_path: The relative path of the file to open.
         """
-        if not self.server_started:
-            self.logger.log(
-                "get_open_file_text called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
         absolute_file_path = str(
             PurePath(self.repository_root_path, relative_file_path)
@@ -421,14 +397,9 @@ class LanguageServer:
         :return List[multilspy_types.Location]: A list of locations where the symbol is defined
         """
 
-        if not self.server_started:
-            self.logger.log(
-                "find_function_definition called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             # sending request to the language server and waiting for response
             response = await self.server.send.definition(
                 {
@@ -504,14 +475,9 @@ class LanguageServer:
         :return List[multilspy_types.Location]: A list of locations where the symbol is referenced
         """
 
-        if not self.server_started:
-            self.logger.log(
-                "find_all_callers_of_function called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             # sending request to the language server and waiting for response
             response = await self.server.send.references(
                 {
@@ -558,14 +524,9 @@ class LanguageServer:
         :return List[multilspy_types.Location]: A list of locations where the symbol is implemented
         """
 
-        if not self.server_started:
-            self.logger.log(
-                "request_implementations called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             # sending request to the language server and waiting for response
             response = await self.server.send.implementation(
                 {
@@ -641,14 +602,9 @@ class LanguageServer:
         :return List[multilspy_types.Location]: A list of locations where the symbol's type is defined
         """
 
-        if not self.server_started:
-            self.logger.log(
-                "request_type_definitions called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             # sending request to the language server and waiting for response
             response = await self.server.send.type_definition(
                 {
@@ -727,7 +683,7 @@ class LanguageServer:
 
         :return List[multilspy_types.CompletionItem]: A list of completions
         """
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             open_file_buffer = self.open_file_buffers[
                 pathlib.Path(
                     os.path.join(self.repository_root_path, relative_file_path)
@@ -837,7 +793,7 @@ class LanguageServer:
 
         :return Tuple[List[multilspy_types.UnifiedSymbolInformation], Union[List[multilspy_types.TreeRepr], None]]: A list of symbols in the file, and the tree representation of the symbols
         """
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             response = await self.server.send.document_symbol(
                 {
                     "textDocument": {
@@ -892,7 +848,7 @@ class LanguageServer:
 
         :return None
         """
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             response = await self.server.send.hover(
                 {
                     "textDocument": {
@@ -960,14 +916,9 @@ class LanguageServer:
         :return List[multilspy_types.Location]: A list of locations where the symbol is defined
         """
 
-        if not self.server_started:
-            self.logger.log(
-                "request_prepare_call_hierarchy called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             # sending request to the language server and waiting for response
             response = await self.server.send.prepare_call_hierarchy(
                 {
@@ -1019,15 +970,10 @@ class LanguageServer:
         :return Union[List[multilspy_types.CallHierarchyIncomingCall], None]: A list of incoming calls, or None if no calls are found
         """
 
-        if not self.server_started:
-            self.logger.log(
-                "request_incoming_calls called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
         # sending request to the language server and waiting for response
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             param: lsp_types.CallHierarchyIncomingCallsParams = {
                 "item": {
                     "name": item["name"],
@@ -1074,15 +1020,10 @@ class LanguageServer:
         :return Union[List[multilspy_types.CallHierarchyOutgoingCall], None]: A list of outgoing calls, or None if no calls are found
         """
 
-        if not self.server_started:
-            self.logger.log(
-                "request_outgoing_calls called before Language Server started",
-                logging.ERROR,
-            )
-            raise MultilspyException("Language Server not started")
+        await self.server_ready.wait()
 
         # sending request to the language server and waiting for response
-        with self.open_file(relative_file_path):
+        async with self.open_file(relative_file_path):
             param: lsp_types.CallHierarchyOutgoingCallsParams = {
                 "item": {
                     "name": item["name"],
@@ -1271,7 +1212,8 @@ class SyncLanguageServer:
         :return List[multilspy_types.Location]: A list of locations where the symbol is implemented
         """
         result = asyncio.run_coroutine_threadsafe(
-            self.language_server.request_implementation(file_path, line, column), self.loop
+            self.language_server.request_implementation(file_path, line, column),
+            self.loop,
         ).result(timeout=self.timeout)
         return result
 
@@ -1289,7 +1231,8 @@ class SyncLanguageServer:
         :return List[multilspy_types.Location]: A list of locations where the symbol's type is defined
         """
         result = asyncio.run_coroutine_threadsafe(
-            self.language_server.request_type_definition(file_path, line, column), self.loop
+            self.language_server.request_type_definition(file_path, line, column),
+            self.loop,
         ).result(timeout=self.timeout)
         return result
 

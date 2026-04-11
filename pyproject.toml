@@ -1,42 +1,47 @@
 # Read https://setuptools.pypa.io/en/latest/userguide/datafiles.html
 [build-system]
-requires = ["flit_core>=3.4"]
 build-backend = "flit_core.buildapi"
+requires = ["flit_core>=3.4"]
 
 [project]
-name = "multilspy"
-version = "0.0.15"
 authors = [
-  { name="Lakshya A Agrawal", email="lakshya.aagrawal@gmail.com" },
+  {name = "Lakshya A Agrawal", email = "lakshya.aagrawal@gmail.com"},
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Development Status :: 2 - Pre-Alpha",
+  "Topic :: Software Development",
+  "Topic :: Text Editors :: Integrated Development Environments (IDE)",
+  "Programming Language :: C#",
+  "Programming Language :: Java",
+  "Programming Language :: Python",
+  "Programming Language :: Rust",
+  "Programming Language :: JavaScript",
+  "Programming Language :: Go",
+  "Programming Language :: Ruby",
 ]
 description = "A language-agnostic LSP client in Python, with a library interface. Intended to be used to build applications around language servers. Currently multilspy supports language servers for Python, Rust, Java, Go, JavaScript, Ruby, C# and Dart. Originally appeared as part of Monitor-Guided Decoding (https://github.com/microsoft/monitors4codegen)"
+name = "multilspy"
 readme = "README.md"
 requires-python = ">=3.8, <4.0"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent",
-    "Development Status :: 2 - Pre-Alpha",
-    "Topic :: Software Development",
-    "Topic :: Text Editors :: Integrated Development Environments (IDE)",
-    "Programming Language :: C#",
-    "Programming Language :: Java",
-    "Programming Language :: Python",
-    "Programming Language :: Rust",
-    "Programming Language :: JavaScript",
-    "Programming Language :: Go",
-    "Programming Language :: Ruby",
-]
+version = "0.0.15"
 
 dependencies = [
   "jedi-language-server==0.41.3",
   "requests==2.32.3",
   "typing-extensions>=4.2.0",
-  "psutil (>=7.0.0,<8.0.0)"
+  "psutil (>=7.0.0,<8.0.0)",
+  "quart>=0.19.0,<0.20.0",
+  "uvicorn>=0.20.0,<0.30.0",
 ]
 
+[project.scripts]
+ra-lsp = "multilspy_cli.cli:main"
+
 [project.urls]
-"Homepage" = "https://github.com/microsoft/multilspy"
 "Bug Tracker" = "https://github.com/microsoft/multilspy/issues"
+"Homepage" = "https://github.com/microsoft/multilspy"
 
 [tool.setuptools]
 include-package-data = true

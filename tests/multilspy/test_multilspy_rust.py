@@ -166,11 +166,16 @@ async def test_multilspy_rust_completions_mediaplayer() -> None:
 
 @pytest.mark.asyncio
 async def test_multilspy_rust_call_hierarchy() -> None:
+    # create a tmp log file for save the lsp communication
+    import tempfile
+
+    log_file_name = tempfile.mktemp()
+
     config = MultilspyConfig.from_dict(
         {
             "code_language": "rust",
             "trace_lsp_communication": False,
-            "std_error_log_file": "/tmp/test-lsp-rust-analyzer.log",
+            "std_error_log_file": f"/tmp/test_lsp_{log_file_name}",
         }
     )  # Also supports "python", "rust", "csharp", "typescript", "javascript", "go", "dart", "ruby"
     logger = MultilspyLogger()
@@ -184,7 +189,7 @@ async def test_multilspy_rust_call_hierarchy() -> None:
             2091,
             3,
         )
-        print(definition)
+        assert len(definition) > 0
 
         print("request_document_symbols")
         result = await lsp.request_document_symbols(
@@ -202,7 +207,7 @@ async def test_multilspy_rust_call_hierarchy() -> None:
                     range_["start"]["line"],
                     range_["start"]["character"],
                 )
-                print(call_hierarchy_list)
+                assert len(call_hierarchy_list) > 0
 
                 call_hierarchy_item = call_hierarchy_list[0]
 
@@ -211,27 +216,32 @@ async def test_multilspy_rust_call_hierarchy() -> None:
                     "chat/chat-modules/chat-chats/src/services/chats.rs",
                     call_hierarchy_item,
                 )
-                print(incoming_calls)
+                assert len(incoming_calls) > 0
 
                 print("request_outgoing_calls")
                 outgoing_calls = await lsp.request_outgoing_calls(
                     "chat/chat-modules/chat-chats/src/services/chats.rs",
                     call_hierarchy_item,
                 )
-                print(outgoing_calls)
+                assert len(outgoing_calls) > 0
 
 
 @pytest.mark.asyncio
-async def test_multilspy_rust_implementation_and_type_definition() -> None:
+async def test_multilspy_rust_implementation_and_definition() -> None:
     """
-    Test the request_implementation and request_type_definition methods for Rust language server
+    Test the request_implementation and request_definition methods for Rust language server
     using local rust-sdk repository
     """
+    # create a tmp log file for save the lsp communication
+    import tempfile
+
+    log_file_name = tempfile.mktemp()
+
     config = MultilspyConfig.from_dict(
         {
             "code_language": "rust",
             "trace_lsp_communication": False,
-            "std_error_log_file": "/tmp/test-lsp-rust-analyzer.log",
+            "std_error_log_file": f"/tmp/test_lsp_{log_file_name}",
         }
     )
     logger = MultilspyLogger()
@@ -240,10 +250,10 @@ async def test_multilspy_rust_implementation_and_type_definition() -> None:
     )
     async with lsp.start_server():
         # Test type_definition: Request type of a variable in chats.rs
-        type_defs = await lsp.request_type_definition(
+        type_defs = await lsp.request_definition(
             "chat/chat-modules/chat-chats/src/services/chats.rs",
-            2091,
-            3,
+            72,
+            14,
         )
 
         assert isinstance(type_defs, list)
@@ -255,29 +265,13 @@ async def test_multilspy_rust_implementation_and_type_definition() -> None:
             assert "absolutePath" in item
             assert "relativePath" in item
 
-        # Test implementation: Find implementations of a trait method
-        # First find a trait method position
-        symbol_result = await lsp.request_document_symbols(
-            "chat/chat-modules/chat-chats/src/services/chats.rs"
+        impls = await lsp.request_implementation(
+            "chat/chat-modules/chat-chats/src/services/chats.rs", 71, 52
         )
-
-        # Look for a method that has implementations
-        for symbol in symbol_result[0]:
-            if symbol["kind"] == 12:  # Function kind
-                range_ = symbol["selectionRange"]
-                impls = await lsp.request_implementation(
-                    "chat/chat-modules/chat-chats/src/services/chats.rs",
-                    range_["start"]["line"],
-                    range_["start"]["character"],
-                )
-                assert len(impls) > 0
-                # Verify implementation response structure
-                for item in impls:
-                    assert "uri" in item
-                    assert "range" in item
-                    assert "absolutePath" in item
-                    assert "relativePath" in item
-                break
-
-        # If no method with implementations found, at least verify the method doesn't crash
-        assert True, "Implementation request works correctly"
+        assert len(impls) > 0
+        # Verify implementation response structure
+        for item in impls:
+            assert "uri" in item
+            assert "range" in item
+            assert "absolutePath" in item
+            assert "relativePath" in item
