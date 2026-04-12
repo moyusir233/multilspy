@@ -73,7 +73,7 @@ struct AppState {
     manager: Arc<LSPManager>,
 }
 
-pub async fn start_server() {
+pub async fn start_server() -> Result<u16, crate::error::CliError> {
     let manager = Arc::new(LSPManager::new());
     let state = AppState { manager };
 
@@ -93,8 +93,14 @@ pub async fn start_server() {
         .route("/outgoing_calls_recursive", post(outgoing_calls_recursive))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    Ok(port)
 }
 
 async fn health() -> Json<ApiResponse> {
