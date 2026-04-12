@@ -18,6 +18,7 @@ reqwest.workspace = true
 tracing-subscriber = "0.3"
 multilspy-protocol = { path = "../multilspy-protocol" }
 multilspy-rust = { path = "../multilspy-rust" }
+libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2.0"
