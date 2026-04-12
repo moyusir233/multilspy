@@ -2591,9 +2591,387 @@ git commit -m "feat(cli): implement IPC client/server layer with Axum and Reqwes
 
 ---
 
-## Task 13: Implement All CLI Command Handlers
+## Task 13: Implement Position Utils Module
 
 **Files:**
+- Create: `rust/multilspy-cli/src/position_utils.rs`
+
+**Step 1: Write position_utils.rs with 1-based to 0-based position conversion**
+```rust
+//! Position conversion utilities between raw file positions (1-based) and LSP positions (0-based).
+//!
+//! According to LSP specification:
+//! - LSP uses 0-based line numbers and 0-based UTF-16 character offsets
+//! - Raw file positions use 1-based line numbers and 1-based column numbers
+
+use multilspy_protocol::protocol::common::{Position, Range, Location, DocumentSymbol, CallHierarchyItem, CallHierarchyIncomingCall, CallHierarchyOutgoingCall};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Convert a raw file position (1-based) to an LSP position (0-based).
+pub fn raw_to_lsp_position(raw_line: u32, raw_column: u32) -> Position {
+    Position {
+        line: raw_line - 1,
+        character: raw_column - 1,
+    }
+}
+
+/// Convert an LSP position (0-based) to a raw file position (1-based).
+pub fn lsp_to_raw_position(lsp_line: u32, lsp_character: u32) -> (u32, u32) {
+    (lsp_line + 1, lsp_character + 1)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawPosition {
+    pub line: u32,
+    pub column: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawRange {
+    pub start: RawPosition,
+    pub end: RawPosition,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawLocation {
+    pub uri: String,
+    pub range: RawRange,
+}
+
+/// Convert an LSP Range's positions from 0-based to 1-based.
+pub fn convert_lsp_range_to_raw(range: &Range) -> RawRange {
+    let (start_line, start_column) = lsp_to_raw_position(range.start.line, range.start.character);
+    let (end_line, end_column) = lsp_to_raw_position(range.end.line, range.end.character);
+    
+    RawRange {
+        start: RawPosition { line: start_line, column: start_column },
+        end: RawPosition { line: end_line, column: end_column },
+    }
+}
+
+/// Convert an LSP Location's positions from 0-based to 1-based.
+pub fn convert_lsp_location_to_raw(location: &Location) -> RawLocation {
+    RawLocation {
+        uri: location.uri.clone(),
+        range: convert_lsp_range_to_raw(&location.range),
+    }
+}
+
+/// Convert a list of LSP Locations to use 1-based positions.
+pub fn convert_all_locations_to_raw(locations: &[Location]) -> Vec<RawLocation> {
+    locations.iter().map(convert_lsp_location_to_raw).collect()
+}
+
+/// Convert a CallHierarchyItem's positions from 0-based to 1-based.
+pub fn convert_call_hierarchy_item_to_raw(item: &CallHierarchyItem) -> CallHierarchyItemRaw {
+    CallHierarchyItemRaw {
+        name: item.name.clone(),
+        kind: item.kind,
+        tags: item.tags.clone(),
+        detail: item.detail.clone(),
+        uri: item.uri.clone(),
+        range: convert_lsp_range_to_raw(&item.range),
+        selection_range: convert_lsp_range_to_raw(&item.selection_range),
+        data: item.data.clone(),
+    }
+}
+
+/// Convert incoming calls (CallHierarchyIncomingCall) to use 1-based positions.
+pub fn convert_incoming_calls_to_raw(calls: &[CallHierarchyIncomingCall]) -> Vec<CallHierarchyIncomingCallRaw> {
+    calls.iter().map(|call| CallHierarchyIncomingCallRaw {
+        from: convert_call_hierarchy_item_to_raw(&call.from),
+        from_ranges: call.from_ranges.iter().map(convert_lsp_range_to_raw).collect(),
+    }).collect()
+}
+
+/// Convert outgoing calls (CallHierarchyOutgoingCall) to use 1-based positions.
+pub fn convert_outgoing_calls_to_raw(calls: &[CallHierarchyOutgoingCall]) -> Vec<CallHierarchyOutgoingCallRaw> {
+    calls.iter().map(|call| CallHierarchyOutgoingCallRaw {
+        to: convert_call_hierarchy_item_to_raw(&call.to),
+        from_ranges: call.from_ranges.iter().map(convert_lsp_range_to_raw).collect(),
+    }).collect()
+}
+
+/// Convert document symbols to use 1-based positions.
+pub fn convert_document_symbols_to_raw(symbols: &[DocumentSymbol]) -> Vec<DocumentSymbolRaw> {
+    symbols.iter().map(|symbol| DocumentSymbolRaw {
+        name: symbol.name.clone(),
+        detail: symbol.detail.clone(),
+        kind: symbol.kind,
+        tags: symbol.tags.clone(),
+        deprecated: symbol.deprecated,
+        range: convert_lsp_range_to_raw(&symbol.range),
+        selection_range: convert_lsp_range_to_raw(&symbol.selection_range),
+        children: symbol.children.as_ref().map(|children| convert_document_symbols_to_raw(children)),
+    }).collect()
+}
+
+/// Get the unique key for a CallHierarchyItem, composed of name, uri, and range.
+pub fn get_call_hierarchy_key(item: &CallHierarchyItem) -> String {
+    let range_str = format!(
+        "{},{} - {},{}",
+        item.range.start.line,
+        item.range.start.character,
+        item.range.end.line,
+        item.range.end.character
+    );
+    format!("{}|{}|{}", item.name, item.uri, range_str)
+}
+
+/// Extract information from a CallHierarchyItem (excluding name and uri which are used as key).
+pub fn extract_call_hierarchy_item_info(item: &CallHierarchyItem) -> CallHierarchyItemInfo {
+    CallHierarchyItemInfo {
+        kind: item.kind,
+        tags: item.tags.clone(),
+        detail: item.detail.clone(),
+        range: convert_lsp_range_to_raw(&item.range),
+        selection_range: convert_lsp_range_to_raw(&item.selection_range),
+        data: item.data.clone(),
+    }
+}
+
+/// Raw (1-based) version of CallHierarchyItem
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallHierarchyItemRaw {
+    pub name: String,
+    pub kind: multilspy_protocol::protocol::common::SymbolKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<multilspy_protocol::protocol::common::SymbolTag>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub uri: String,
+    pub range: RawRange,
+    pub selection_range: RawRange,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
+/// Raw (1-based) version of CallHierarchyIncomingCall
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallHierarchyIncomingCallRaw {
+    pub from: CallHierarchyItemRaw,
+    pub from_ranges: Vec<RawRange>,
+}
+
+/// Raw (1-based) version of CallHierarchyOutgoingCall
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallHierarchyOutgoingCallRaw {
+    pub to: CallHierarchyItemRaw,
+    pub from_ranges: Vec<RawRange>,
+}
+
+/// Raw (1-based) version of DocumentSymbol
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSymbolRaw {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub kind: multilspy_protocol::protocol::common::SymbolKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<multilspy_protocol::protocol::common::SymbolTag>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<bool>,
+    pub range: RawRange,
+    pub selection_range: RawRange,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<DocumentSymbolRaw>>,
+}
+
+/// Extracted info from CallHierarchyItem
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallHierarchyItemInfo {
+    pub kind: multilspy_protocol::protocol::common::SymbolKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<multilspy_protocol::protocol::common::SymbolTag>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub range: RawRange,
+    pub selection_range: RawRange,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
+/// Recursive incoming calls result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecursiveIncomingCallEntry {
+    pub info: CallHierarchyItemInfo,
+    pub incoming_calls: Vec<RecursiveIncomingCallRef>,
+}
+
+/// Reference to a recursive incoming call
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecursiveIncomingCallRef {
+    pub key: String,
+    pub from_ranges: Vec<RawRange>,
+}
+
+/// Recursive outgoing calls result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecursiveOutgoingCallEntry {
+    pub info: CallHierarchyItemInfo,
+    pub outgoing_calls: Vec<RecursiveOutgoingCallRef>,
+}
+
+/// Reference to a recursive outgoing call
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecursiveOutgoingCallRef {
+    pub key: String,
+    pub from_ranges: Vec<RawRange>,
+}
+
+/// Recursive incoming calls result map
+pub type RecursiveIncomingCallsResult = HashMap<String, RecursiveIncomingCallEntry>;
+
+/// Recursive outgoing calls result map
+pub type RecursiveOutgoingCallsResult = HashMap<String, RecursiveOutgoingCallEntry>;
+```
+
+**Step 2: Update main.rs to include position_utils module**
+Add to main.rs:
+```rust
+mod position_utils;
+```
+
+**Step 3: Run clippy to ensure code standardization**
+Run: `cd rust && cargo clippy -p multilspy-cli -- -D warnings`
+Expected: No clippy warnings or errors
+
+**Step 4: Commit**
+```bash
+git add rust/multilspy-cli/src/position_utils.rs rust/multilspy-cli/src/main.rs
+git commit -m "feat(cli): implement position utils module"
+```
+
+---
+
+## Task 14: Complete IPC Server Implementation with All Handlers
+
+**Files:**
+- Modify: `rust/multilspy-cli/src/ipc/server.rs`
+- Create: `rust/multilspy-cli/src/ipc/types.rs`
+
+**Step 1: Create ipc/types.rs with shared IPC types**
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+pub struct StartRequest {
+    pub project_path: String,
+}
+
+#[derive(Deserialize)]
+pub struct PositionRequest {
+    pub project_path: String,
+    pub file_path: String,
+    pub line: u32,
+    pub column: u32,
+}
+
+#[derive(Deserialize)]
+pub struct ReferencesRequest {
+    pub project_path: String,
+    pub file_path: String,
+    pub line: u32,
+    pub column: u32,
+}
+
+#[derive(Deserialize)]
+pub struct DocumentSymbolsRequest {
+    pub project_path: String,
+    pub file_path: String,
+}
+
+#[derive(Deserialize)]
+pub struct RecursiveRequest {
+    pub project_path: String,
+    pub file_path: String,
+    pub line: u32,
+    pub column: u32,
+    pub max_depth: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct ApiResponse<T> {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl<T> ApiResponse<T> {
+    pub fn ok(result: T) -> Self {
+        Self {
+            status: "ok".to_string(),
+            result: Some(result),
+            message: None,
+        }
+    }
+
+    pub fn error(message: String) -> Self {
+        Self {
+            status: "error".to_string(),
+            result: None,
+            message: Some(message),
+        }
+    }
+
+    pub fn already_running() -> ApiResponse<()> {
+        Self {
+            status: "already_running".to_string(),
+            result: None,
+            message: None,
+        }
+    }
+
+    pub fn stopped() -> ApiResponse<()> {
+        Self {
+            status: "ok".to_string(),
+            result: None,
+            message: None,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct StatusResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+}
+```
+
+**Step 2: Update ipc/mod.rs to include types module**
+```rust
+pub mod server;
+pub mod client;
+pub mod types;
+```
+
+**Step 3: Update ipc/server.rs with full handler implementations**
+Replace the existing server.rs with complete implementation that:
+- Uses position_utils for position conversion
+- Implements all LSP endpoints (definition, type-definition, references, document-symbols, implementation, incoming-calls, outgoing-calls, incoming-calls-recursive, outgoing-calls-recursive)
+- Returns properly formatted JSON matching Python output
+- Uses RecursiveCallHierarchy for recursive calls
+
+**Step 4: Run clippy to ensure code standardization**
+Run: `cd rust && cargo clippy -p multilspy-cli -- -D warnings`
+Expected: No clippy warnings or errors
+
+**Step 5: Commit**
+```bash
+git add rust/multilspy-cli/src/ipc/types.rs rust/multilspy-cli/src/ipc/mod.rs rust/multilspy-cli/src/ipc/server.rs
+git commit -m "feat(cli): complete IPC server implementation with all handlers"
+```
+
+---
+
+## Task 15: Complete IPC Client and Main CLI Integration
+
+**Files:**
+- Modify: `rust/multilspy-cli/src/ipc/client.rs`
 - Modify: `rust/multilspy-cli/src/main.rs`
 - Create: `rust/multilspy-cli/src/commands/definition.rs`
 - Create: `rust/multilspy-cli/src/commands/type_definition.rs`
@@ -2604,49 +2982,122 @@ git commit -m "feat(cli): implement IPC client/server layer with Axum and Reqwes
 - Create: `rust/multilspy-cli/src/commands/outgoing_calls.rs`
 - Create: `rust/multilspy-cli/src/commands/incoming_calls_recursive.rs`
 - Create: `rust/multilspy-cli/src/commands/outgoing_calls_recursive.rs`
+- Modify: `rust/multilspy-cli/src/commands/server.rs`
 
-(Full implementation continues with each command handler, matching Python CLI output exactly)
+**Step 1: Update ipc/client.rs with all client methods**
+Add all missing methods:
+- definition, type_definition, references
+- document_symbols, implementation
+- incoming_calls, outgoing_calls
+- incoming_calls_recursive, outgoing_calls_recursive
 
-- [ ] **Step 1: Implement all command handlers with output formatting matching Python CLI**
-- [ ] **Step 2: Integrate daemon and IPC clients**
-- [ ] **Step 3: Run clippy**
-- [ ] **Step 4: Commit**
+**Step 2: Create command handler modules**
+Create each command file with a handle function that:
+- Resolves project root (finds Cargo.toml)
+- Resolves file path relative to project
+- Ensures daemon is running (starts it if not)
+- Calls appropriate IPC client method
+- Prints JSON output matching Python format
+
+**Step 3: Update commands/server.rs with full server command handlers**
+Implement start, stop, restart, status commands with:
+- PID file management
+- Port file management
+- Daemon process spawning
+- Status checking
+
+**Step 4: Update main.rs with full command dispatch**
+Replace the placeholder main with complete dispatch:
+- Import all command modules
+- Match on Commands enum
+- Call appropriate command handlers
+- Print JSON output exactly matching Python
+
+**Step 5: Add daemon spawning to daemon/manager.rs**
+Update DaemonManager::start() to:
+- Fork process (Unix) or spawn (Windows)
+- Write PID file
+- Write port file
+- Start IPC server
+
+**Step 6: Run clippy to ensure code standardization**
+Run: `cd rust && cargo clippy -p multilspy-cli -- -D warnings`
+Expected: No clippy warnings or errors
+
+**Step 7: Commit**
+```bash
+git add rust/multilspy-cli/src/ipc/client.rs rust/multilspy-cli/src/main.rs rust/multilspy-cli/src/commands/*.rs rust/multilspy-cli/src/daemon/manager.rs
+git commit -m "feat(cli): complete CLI integration with all command handlers"
+```
 
 ---
 
-## Task 14: Port Test Cases from Python to Rust
+## Task 16: Port Test Cases from Python to Rust
 
 **Files:**
-- Create: `rust/multilspy-protocol/tests/` (full test suite)
-- Create: `rust/multilspy-rust/tests/` (full test suite)
-- Create: `rust/multilspy-cli/tests/` (full test suite)
+- Create: `rust/multilspy-protocol/tests/protocol_tests.rs`
+- Create: `rust/multilspy-rust/tests/client_tests.rs`
+- Create: `rust/multilspy-cli/tests/cli_tests.rs`
 
-- [ ] **Step 1: Write unit tests for all components**
-- [ ] **Step 2: Write integration tests with real Rust projects**
-- [ ] **Step 3: Write functional parity tests comparing output with Python**
-- [ ] **Step 4: Run all tests**
-- [ ] **Step 5: Commit**
+**Step 1: Write protocol tests**
+Test JSON-RPC serialization, LSP type serialization, transport layer.
+
+**Step 2: Write client tests**
+Test LspClient and RecursiveCallHierarchy with mock server.
+
+**Step 3: Write CLI tests**
+Test CLI parsing, IPC client, command handlers.
+
+**Step 4: Run all tests**
+Run: `cd rust && cargo test --all`
+Expected: All tests pass
+
+**Step 5: Commit**
+```bash
+git add rust/multilspy-protocol/tests/ rust/multilspy-rust/tests/ rust/multilspy-cli/tests/
+git commit -m "feat(tests): port test cases from Python to Rust"
+```
 
 ---
 
-## Task 15: Performance Verification
+## Task 17: Performance Verification
 
 **Files:**
-- Create: `benchmarks/` directory
-- Create: `benchmarks/benchmark.rs`
+- Create: `rust/benches/benchmark.rs`
+- Create: `rust/benches/Cargo.toml`
 - Create: `docs/performance-report.md`
 
-- [ ] **Step 1: Write benchmark tests comparing Rust implementation with Python**
-- [ ] **Step 2: Run benchmarks and document performance improvements**
-- [ ] **Step 3: Verify ≥2x performance improvement**
-- [ ] **Step 4: Commit benchmark results and optimizations**
+**Step 1: Set up benchmark framework**
+Add criterion to workspace dependencies.
+
+**Step 2: Write benchmark tests**
+Benchmark:
+- LSP client startup/shutdown
+- Definition lookup
+- References lookup
+- Call hierarchy queries
+- Recursive call hierarchy (various depths)
+- Compare with Python implementation
+
+**Step 3: Run benchmarks**
+Run: `cd rust && cargo bench`
+
+**Step 4: Verify ≥2x performance improvement**
+Document results in performance-report.md.
+
+**Step 5: Commit**
+```bash
+git add rust/benches/ docs/performance-report.md
+git commit -m "perf: add benchmarks and performance report"
+```
 
 ---
 
 ## Plan Complete
 
-The plan is now fully detailed. All tasks include exact file paths, complete code examples, and verification steps.
+The plan is now fully detailed with all tasks 1-17. All tasks include exact file paths, complete code examples, and verification steps.
 
 ### Execution
 We'll proceed with Subagent-Driven execution as requested, using superpowers:subagent-driven-development.
+
 
