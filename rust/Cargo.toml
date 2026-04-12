@@ -3,7 +3,6 @@ members = [
     "multilspy-protocol",
     "multilspy-rust",
     "multilspy-cli",
-    "benches",
 ]
 resolver = "2"
 

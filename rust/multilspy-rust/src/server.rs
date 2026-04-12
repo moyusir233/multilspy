@@ -71,7 +71,10 @@ impl RustAnalyzerServer {
 
         let params = InitializeParams {
             process_id: Some(std::process::id()),
+            client_info: None,
+            locale: None,
             root_uri: Some(format!("file://{}", self.config.project_root.to_string_lossy())),
+            initialization_options: None,
             capabilities: ClientCapabilities::default(),
             trace: Some("off".to_string()),
             workspace_folders: Some(vec![]),
@@ -88,8 +91,7 @@ impl RustAnalyzerServer {
         let response = transport.receive_response().await?;
 
         match response.result {
-            multilspy_protocol::json_rpc::ResponseResult::Result(_) => {
-                // Send initialized notification
+            Some(multilspy_protocol::json_rpc::ResponseResult::Result(_)) => {
                 let notification = Notification {
                     jsonrpc: "2.0".to_string(),
                     method: "initialized".to_string(),
@@ -100,9 +102,10 @@ impl RustAnalyzerServer {
 
                 Ok(())
             }
-            multilspy_protocol::json_rpc::ResponseResult::Error(err) => {
+            Some(multilspy_protocol::json_rpc::ResponseResult::Error(err)) => {
                 Err(ServerError::InitializationFailed(format!("{} (code: {})", err.message, err.code)))
             }
+            None => Ok(()),
         }
     }
 
@@ -168,10 +171,11 @@ impl RustAnalyzerServer {
         }
 
         match response.result {
-            multilspy_protocol::json_rpc::ResponseResult::Result(result) => Ok(result),
-            multilspy_protocol::json_rpc::ResponseResult::Error(err) => {
+            Some(multilspy_protocol::json_rpc::ResponseResult::Result(result)) => Ok(result),
+            Some(multilspy_protocol::json_rpc::ResponseResult::Error(err)) => {
                 Err(ServerError::ProtocolError(multilspy_protocol::error::ProtocolError::InvalidMessage(format!("Request failed: {} (code: {})", err.message, err.code))))
             }
+            None => Ok(serde_json::Value::Null),
         }
     }
 
