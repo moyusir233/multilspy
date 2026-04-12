@@ -2,6 +2,7 @@ use super::client::LspClient;
 use super::config::RustAnalyzerConfig;
 use super::error::ServerError;
 use multilspy_protocol::protocol::common::*;
+use multilspy_protocol::protocol::responses::*;
 use std::collections::{HashSet, VecDeque};
 
 pub struct RecursiveCallHierarchy {
@@ -23,6 +24,73 @@ impl RecursiveCallHierarchy {
 
     pub async fn stop(&mut self) -> Result<(), ServerError> {
         self.client.stop().await
+    }
+
+    pub async fn definition(
+        &mut self,
+        uri: String,
+        line: u32,
+        character: u32,
+    ) -> Result<DefinitionResponse, ServerError> {
+        self.client.definition(uri, line, character).await
+    }
+
+    pub async fn type_definition(
+        &mut self,
+        uri: String,
+        line: u32,
+        character: u32,
+    ) -> Result<TypeDefinitionResponse, ServerError> {
+        self.client.type_definition(uri, line, character).await
+    }
+
+    pub async fn references(
+        &mut self,
+        uri: String,
+        line: u32,
+        character: u32,
+        include_declaration: bool,
+    ) -> Result<ReferencesResponse, ServerError> {
+        self.client.references(uri, line, character, include_declaration).await
+    }
+
+    pub async fn document_symbols(
+        &mut self,
+        uri: String,
+    ) -> Result<DocumentSymbolResponse, ServerError> {
+        self.client.document_symbols(uri).await
+    }
+
+    pub async fn implementation(
+        &mut self,
+        uri: String,
+        line: u32,
+        character: u32,
+    ) -> Result<ImplementationResponse, ServerError> {
+        self.client.implementation(uri, line, character).await
+    }
+
+    pub async fn prepare_call_hierarchy(
+        &mut self,
+        uri: String,
+        line: u32,
+        character: u32,
+    ) -> Result<CallHierarchyPrepareResponse, ServerError> {
+        self.client.prepare_call_hierarchy(uri, line, character).await
+    }
+
+    pub async fn incoming_calls(
+        &mut self,
+        item: CallHierarchyItem,
+    ) -> Result<CallHierarchyIncomingCallsResponse, ServerError> {
+        self.client.incoming_calls(item).await
+    }
+
+    pub async fn outgoing_calls(
+        &mut self,
+        item: CallHierarchyItem,
+    ) -> Result<CallHierarchyOutgoingCallsResponse, ServerError> {
+        self.client.outgoing_calls(item).await
     }
 
     pub async fn incoming_calls_recursive(

@@ -83,6 +83,8 @@ pub async fn start_server() {
         .route("/shutdown", post(shutdown))
         .route("/status", get(status))
         .route("/definition", post(definition))
+        .route("/type_definition", post(type_definition))
+        .route("/implementation", post(implementation))
         .route("/references", post(references))
         .route("/document_symbols", post(document_symbols))
         .route("/incoming_calls", post(incoming_calls))
@@ -164,7 +166,7 @@ async fn definition(
 
     let result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.client.definition(file_uri, lsp_pos.line, lsp_pos.character).await
+        lsp_guard.definition(file_uri, lsp_pos.line, lsp_pos.character).await
     };
 
     match result {
@@ -173,6 +175,66 @@ async fn definition(
             Json(ApiResponse::ok(raw_locations))
         }
         Err(e) => Json(ApiResponse::error(format!("Failed to get definition: {}", e))),
+    }
+}
+
+async fn type_definition(
+    State(state): State<AppState>,
+    Json(req): Json<PositionRequest>,
+) -> Json<ApiResponse> {
+    if req.project_path.is_empty() || req.file_path.is_empty() {
+        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+    }
+
+    let Some(instance) = state.manager.get_instance(&req.project_path).await else {
+        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+    };
+
+    let lsp = instance.lsp.clone();
+    let file_uri = format!("file://{}", req.file_path);
+    let lsp_pos = raw_to_lsp_position(req.line, req.column);
+
+    let result = {
+        let mut lsp_guard = lsp.lock().await;
+        lsp_guard.type_definition(file_uri, lsp_pos.line, lsp_pos.character).await
+    };
+
+    match result {
+        Ok(locations) => {
+            let raw_locations = convert_all_locations_to_raw(&locations);
+            Json(ApiResponse::ok(raw_locations))
+        }
+        Err(e) => Json(ApiResponse::error(format!("Failed to get type definition: {}", e))),
+    }
+}
+
+async fn implementation(
+    State(state): State<AppState>,
+    Json(req): Json<PositionRequest>,
+) -> Json<ApiResponse> {
+    if req.project_path.is_empty() || req.file_path.is_empty() {
+        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+    }
+
+    let Some(instance) = state.manager.get_instance(&req.project_path).await else {
+        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+    };
+
+    let lsp = instance.lsp.clone();
+    let file_uri = format!("file://{}", req.file_path);
+    let lsp_pos = raw_to_lsp_position(req.line, req.column);
+
+    let result = {
+        let mut lsp_guard = lsp.lock().await;
+        lsp_guard.implementation(file_uri, lsp_pos.line, lsp_pos.character).await
+    };
+
+    match result {
+        Ok(locations) => {
+            let raw_locations = convert_all_locations_to_raw(&locations);
+            Json(ApiResponse::ok(raw_locations))
+        }
+        Err(e) => Json(ApiResponse::error(format!("Failed to get implementation: {}", e))),
     }
 }
 
@@ -194,7 +256,7 @@ async fn references(
 
     let result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.client.references(file_uri, lsp_pos.line, lsp_pos.character, true).await
+        lsp_guard.references(file_uri, lsp_pos.line, lsp_pos.character, true).await
     };
 
     match result {
@@ -223,7 +285,7 @@ async fn document_symbols(
 
     let result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.client.document_symbols(file_uri).await
+        lsp_guard.document_symbols(file_uri).await
     };
 
     match result {
@@ -253,7 +315,7 @@ async fn incoming_calls(
 
     let items_result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.client.prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character).await
+        lsp_guard.prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character).await
     };
 
     let items = match items_result {
@@ -265,7 +327,7 @@ async fn incoming_calls(
     for item in items {
         let calls_result = {
             let mut lsp_guard = lsp.lock().await;
-            lsp_guard.client.incoming_calls(item).await
+            lsp_guard.incoming_calls(item).await
         };
         match calls_result {
             Ok(calls) => all_calls.extend(calls),
@@ -295,7 +357,7 @@ async fn outgoing_calls(
 
     let items_result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.client.prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character).await
+        lsp_guard.prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character).await
     };
 
     let items = match items_result {
@@ -307,7 +369,7 @@ async fn outgoing_calls(
     for item in items {
         let calls_result = {
             let mut lsp_guard = lsp.lock().await;
-            lsp_guard.client.outgoing_calls(item).await
+            lsp_guard.outgoing_calls(item).await
         };
         match calls_result {
             Ok(calls) => all_calls.extend(calls),
@@ -343,7 +405,7 @@ async fn incoming_calls_recursive(
 
     match result {
         Ok(results) => {
-            let mut result_map = RecursiveIncomingCallsResult::new();
+            let mut result_map: RecursiveIncomingCallsResult = HashMap::new();
 
             for (item, calls) in results {
                 let key = get_call_hierarchy_key(&item);
@@ -395,7 +457,7 @@ async fn outgoing_calls_recursive(
 
     match result {
         Ok(results) => {
-            let mut result_map = RecursiveOutgoingCallsResult::new();
+            let mut result_map: RecursiveOutgoingCallsResult = HashMap::new();
 
             for (item, calls) in results {
                 let key = get_call_hierarchy_key(&item);
