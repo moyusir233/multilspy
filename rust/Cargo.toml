@@ -19,6 +19,7 @@ tokio={ version="1.0", features=[
     "io-std",
     "io-util",
     "process",
+    "signal",
     "sync",
     "macros",
     "rt",
@@ -49,4 +50,4 @@ dashmap="6.1.0"
 futures-lite="2.6.1"
 
 multilspy-protocol={ path="multilspy-protocol" }
-multispy-rust     ={ path="multilspy-rust" }
+multilspy-rust    ={ path="multilspy-rust" }

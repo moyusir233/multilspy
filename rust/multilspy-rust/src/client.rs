@@ -7,6 +7,7 @@ use multilspy_protocol::protocol::common::*;
 use multilspy_protocol::protocol::requests::*;
 use multilspy_protocol::protocol::responses::*;
 
+#[derive(Clone)]
 pub struct LSPClient {
     server: Arc<RustAnalyzerServer>,
 }

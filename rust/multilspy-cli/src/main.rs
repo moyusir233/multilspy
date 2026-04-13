@@ -1,133 +1,364 @@
-use clap::Parser;
-use commands::server::ServerCommand;
-
-mod commands;
 mod daemon;
-mod error;
 mod ipc;
-mod position_utils;
+mod lifecycle;
 
-use error::CliError;
+use std::path::PathBuf;
+use std::process::ExitCode;
 
-type Result<T> = std::result::Result<T, CliError>;
+use clap::{Parser, Subcommand};
+use ipc::{IpcRequest, IpcResponse};
 
-#[derive(Parser, Debug)]
-#[command(name = "multilspy", version, about, long_about = None)]
-#[command(propagate_version = true)]
-pub struct Cli {
-    #[arg(long, short, help = "Path to the project root (default: current working directory)")]
-    pub project: Option<String>,
+#[derive(Parser)]
+#[command(
+    name = "multilspy",
+    about = "LSP CLI for AI agents — persistent daemon avoids repeated server initialization",
+    version
+)]
+struct Cli {
+    #[arg(
+        long,
+        short = 'w',
+        global = true,
+        help = "Workspace root directory (defaults to current directory)"
+    )]
+    workspace: Option<PathBuf>,
+
+    #[arg(
+        long,
+        short = 'i',
+        global = true,
+        help = "Path to ra_initialize_params.json"
+    )]
+    initialize_params: Option<PathBuf>,
 
     #[command(subcommand)]
-    pub command: Commands,
+    command: Command,
 }
 
-#[derive(clap::Subcommand, Debug)]
-pub enum Commands {
-    /// Manage the multilspy server
-    Server {
-        #[command(subcommand)]
-        command: ServerCommand,
-    },
-    /// Internal: Run the daemon (not for user use)
-    Daemon,
-    /// Get definition of a symbol
+#[derive(Subcommand)]
+enum Command {
+    #[command(about = "Go to definition at a given position")]
     Definition {
-        file: String,
+        #[arg(long, help = "Document URI (file:///...)")]
+        uri: String,
+        #[arg(long, help = "Zero-based line number")]
         line: u32,
-        column: u32,
+        #[arg(long, help = "Zero-based character offset")]
+        character: u32,
     },
-    /// Get type definition of a symbol
+
+    #[command(about = "Go to type definition at a given position")]
     TypeDefinition {
-        file: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
         line: u32,
-        column: u32,
+        #[arg(long)]
+        character: u32,
     },
-    /// Get all references to a symbol
-    References {
-        file: String,
-        line: u32,
-        column: u32,
-    },
-    /// Get all symbols in a document
-    DocumentSymbols {
-        file: String,
-    },
-    /// Get implementations of a function or trait
+
+    #[command(about = "Go to implementation at a given position")]
     Implementation {
-        file: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
         line: u32,
-        column: u32,
+        #[arg(long)]
+        character: u32,
     },
-    /// Get all callers of a function
+
+    #[command(about = "Find all references at a given position")]
+    References {
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
+        line: u32,
+        #[arg(long)]
+        character: u32,
+        #[arg(
+            long,
+            default_value_t = true,
+            default_missing_value = "true",
+            num_args = 0..=1,
+            require_equals = false,
+            help = "Include the declaration itself"
+        )]
+        include_declaration: bool,
+    },
+
+    #[command(about = "List document symbols")]
+    DocumentSymbols {
+        #[arg(long, help = "Document URI (file:///...)")]
+        uri: String,
+    },
+
+    #[command(about = "Find incoming calls at a given position")]
     IncomingCalls {
-        file: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
         line: u32,
-        column: u32,
+        #[arg(long)]
+        character: u32,
     },
-    /// Get all functions called by a function
+
+    #[command(about = "Find outgoing calls at a given position")]
     OutgoingCalls {
-        file: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
         line: u32,
-        column: u32,
+        #[arg(long)]
+        character: u32,
     },
-    /// Get recursive incoming calls to a function
+
+    #[command(about = "Find incoming calls recursively at a given position")]
     IncomingCallsRecursive {
-        file: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
         line: u32,
-        column: u32,
-        #[arg(long, default_value_t = 10, help = "Maximum recursion depth (default: 10)")]
-        max_depth: usize,
+        #[arg(long)]
+        character: u32,
+        #[arg(long, help = "Maximum recursion depth")]
+        max_depth: Option<usize>,
     },
-    /// Get recursive outgoing calls from a function
+
+    #[command(about = "Find outgoing calls recursively at a given position")]
     OutgoingCallsRecursive {
-        file: String,
+        #[arg(long)]
+        uri: String,
+        #[arg(long)]
         line: u32,
-        column: u32,
-        #[arg(long, default_value_t = 10, help = "Maximum recursion depth (default: 10)")]
-        max_depth: usize,
+        #[arg(long)]
+        character: u32,
+        #[arg(long, help = "Maximum recursion depth")]
+        max_depth: Option<usize>,
     },
+
+    #[command(about = "Show daemon status for the current workspace")]
+    Status,
+
+    #[command(about = "Stop the daemon for the current workspace")]
+    Stop,
+
+    #[command(
+        about = "Run the daemon process (internal — used by auto-spawn)",
+        hide = true
+    )]
+    Daemon {
+        #[arg(long)]
+        workspace: PathBuf,
+        #[arg(long = "initialize-params")]
+        initialize_params: PathBuf,
+    },
+}
+
+fn output_json(resp: &IpcResponse) {
+    let json = serde_json::to_string(resp).expect("failed to serialize IpcResponse");
+    println!("{}", json);
+}
+
+fn output_error(code: i32, message: String) {
+    let resp = IpcResponse::error(code, message);
+    output_json(&resp);
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
+
     let cli = Cli::parse();
 
-    match &cli.command {
-        Commands::Server { command } => {
-            commands::server::handle(command).await?;
+    match cli.command {
+        Command::Daemon {
+            workspace,
+            initialize_params,
+        } => {
+            if let Err(e) = daemon::run_daemon(workspace, initialize_params).await {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"error": {"code": -1, "message": e.to_string()}})
+                );
+                return ExitCode::FAILURE;
+            }
+            ExitCode::SUCCESS
         }
-        Commands::Daemon => {
-            daemon::manager::run_daemon().await?;
+        cmd => run_client_command(cmd, cli.workspace, cli.initialize_params).await,
+    }
+}
+
+async fn run_client_command(
+    cmd: Command,
+    workspace_arg: Option<PathBuf>,
+    init_params_arg: Option<PathBuf>,
+) -> ExitCode {
+    let workspace = workspace_arg
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let initialize_params = init_params_arg
+        .unwrap_or_else(|| workspace.join("ra_initialize_params.json"));
+
+    let port = match lifecycle::ensure_daemon(&workspace, &initialize_params).await {
+        Ok(p) => p,
+        Err(e) => {
+            output_error(-1, format!("failed to connect to daemon: {}", e));
+            return ExitCode::FAILURE;
         }
-        Commands::Definition { file, line, column } => {
-            commands::definition::handle(cli.project.as_deref(), file, *line, *column).await?;
+    };
+
+    let request = match build_request(&cmd) {
+        Ok(r) => r,
+        Err(e) => {
+            output_error(ipc::ERR_INVALID_PARAMS, e.to_string());
+            return ExitCode::FAILURE;
         }
-        Commands::TypeDefinition { file, line, column } => {
-            commands::type_definition::handle(cli.project.as_deref(), file, *line, *column).await?;
+    };
+
+    match ipc::send_request(port, &request).await {
+        Ok(resp) => {
+            output_json(&resp);
+            if resp.error.is_some() {
+                return ExitCode::FAILURE;
+            }
+            ExitCode::SUCCESS
         }
-        Commands::References { file, line, column } => {
-            commands::references::handle(cli.project.as_deref(), file, *line, *column).await?;
-        }
-        Commands::DocumentSymbols { file } => {
-            commands::document_symbols::handle(cli.project.as_deref(), file).await?;
-        }
-        Commands::Implementation { file, line, column } => {
-            commands::implementation::handle(cli.project.as_deref(), file, *line, *column).await?;
-        }
-        Commands::IncomingCalls { file, line, column } => {
-            commands::incoming_calls::handle(cli.project.as_deref(), file, *line, *column).await?;
-        }
-        Commands::OutgoingCalls { file, line, column } => {
-            commands::outgoing_calls::handle(cli.project.as_deref(), file, *line, *column).await?;
-        }
-        Commands::IncomingCallsRecursive { file, line, column, max_depth } => {
-            commands::incoming_calls_recursive::handle(cli.project.as_deref(), file, *line, *column, Some(*max_depth)).await?;
-        }
-        Commands::OutgoingCallsRecursive { file, line, column, max_depth } => {
-            commands::outgoing_calls_recursive::handle(cli.project.as_deref(), file, *line, *column, Some(*max_depth)).await?;
+        Err(e) => {
+            output_error(ipc::ERR_INTERNAL, format!("IPC request failed: {}", e));
+            ExitCode::FAILURE
         }
     }
+}
 
-    Ok(())
+fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
+    let (method, params) = match cmd {
+        Command::Definition {
+            uri,
+            line,
+            character,
+        } => (
+            "definition",
+            serde_json::to_value(ipc::PositionParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+            })?,
+        ),
+
+        Command::TypeDefinition {
+            uri,
+            line,
+            character,
+        } => (
+            "type-definition",
+            serde_json::to_value(ipc::PositionParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+            })?,
+        ),
+
+        Command::Implementation {
+            uri,
+            line,
+            character,
+        } => (
+            "implementation",
+            serde_json::to_value(ipc::PositionParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+            })?,
+        ),
+
+        Command::References {
+            uri,
+            line,
+            character,
+            include_declaration,
+        } => (
+            "references",
+            serde_json::to_value(ipc::ReferencesIpcParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+                include_declaration: *include_declaration,
+            })?,
+        ),
+
+        Command::DocumentSymbols { uri } => (
+            "document-symbols",
+            serde_json::to_value(ipc::DocumentSymbolsIpcParams { uri: uri.clone() })?,
+        ),
+
+        Command::IncomingCalls {
+            uri,
+            line,
+            character,
+        } => (
+            "incoming-calls",
+            serde_json::to_value(ipc::PositionParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+            })?,
+        ),
+
+        Command::OutgoingCalls {
+            uri,
+            line,
+            character,
+        } => (
+            "outgoing-calls",
+            serde_json::to_value(ipc::PositionParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+            })?,
+        ),
+
+        Command::IncomingCallsRecursive {
+            uri,
+            line,
+            character,
+            max_depth,
+        } => (
+            "incoming-calls-recursive",
+            serde_json::to_value(ipc::RecursiveCallsIpcParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+                max_depth: *max_depth,
+            })?,
+        ),
+
+        Command::OutgoingCallsRecursive {
+            uri,
+            line,
+            character,
+            max_depth,
+        } => (
+            "outgoing-calls-recursive",
+            serde_json::to_value(ipc::RecursiveCallsIpcParams {
+                uri: uri.clone(),
+                line: *line,
+                character: *character,
+                max_depth: *max_depth,
+            })?,
+        ),
+
+        Command::Status => ("status", serde_json::json!(null)),
+
+        Command::Stop => ("shutdown", serde_json::json!(null)),
+
+        Command::Daemon { .. } => unreachable!(),
+    };
+
+    Ok(IpcRequest {
+        method: method.to_string(),
+        params,
+    })
 }
