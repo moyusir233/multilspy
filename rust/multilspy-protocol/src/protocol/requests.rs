@@ -18,6 +18,8 @@
 //! | [`CallHierarchyPrepareParams`] | `textDocument/prepareCallHierarchy` — [CallHierarchyPrepareParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_prepareCallHierarchy) |
 //! | [`CallHierarchyIncomingCallsParams`] | `callHierarchy/incomingCalls` — [CallHierarchyIncomingCallsParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_incomingCalls) |
 //! | [`CallHierarchyOutgoingCallsParams`] | `callHierarchy/outgoingCalls` — [CallHierarchyOutgoingCallsParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_outgoingCalls) |
+//! | [`DidOpenTextDocumentParams`] | `textDocument/didOpen` — [DidOpenTextDocumentParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didOpenTextDocumentParams) |
+//! | [`DidCloseTextDocumentParams`] | `textDocument/didClose` — [DidCloseTextDocumentParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didCloseTextDocumentParams) |
 
 use super::common::*;
 use serde::{Deserialize, Serialize};
@@ -659,6 +661,73 @@ pub struct CallHierarchyIncomingCallsParams {
 pub struct CallHierarchyOutgoingCallsParams {
     /// The item for which outgoing calls are requested.
     pub item: CallHierarchyItem,
+}
+
+/// Parameters for the `textDocument/didOpen` notification.
+///
+/// The document open notification is sent from the client to the server to signal that a
+/// new text document has been opened by the client. The document's content is now managed
+/// by the client and the server should not try to read the document's content using the
+/// document's URI. Open in this sense means it is managed by the client. It doesn't
+/// necessarily mean that its content is presented in an editor.
+///
+/// # Wire Format
+///
+/// ```json
+/// {
+///   "textDocument": {
+///     "uri": "file:///path/to/file.rs",
+///     "languageId": "rust",
+///     "version": 0,
+///     "text": "fn main() {}"
+///   }
+/// }
+/// ```
+///
+/// # Fields
+///
+/// | Field | Type | Required | Description |
+/// |-------|------|----------|-------------|
+/// | `text_document` | [`TextDocumentItem`] | Yes | The document that was opened. Wire name: `textDocument`. |
+///
+/// # LSP Specification
+///
+/// See [DidOpenTextDocumentParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didOpenTextDocumentParams).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DidOpenTextDocumentParams {
+    /// The document that was opened.
+    pub text_document: TextDocumentItem,
+}
+
+/// Parameters for the `textDocument/didClose` notification.
+///
+/// The document close notification is sent from the client to the server when the document
+/// got closed in the client. The document's master now exists where the document's URI
+/// points to (e.g. if the document's URI is a file URI the master now exists on disk).
+///
+/// # Wire Format
+///
+/// ```json
+/// {
+///   "textDocument": { "uri": "file:///path/to/file.rs" }
+/// }
+/// ```
+///
+/// # Fields
+///
+/// | Field | Type | Required | Description |
+/// |-------|------|----------|-------------|
+/// | `text_document` | [`TextDocumentIdentifier`] | Yes | The document that was closed. Wire name: `textDocument`. |
+///
+/// # LSP Specification
+///
+/// See [DidCloseTextDocumentParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#didCloseTextDocumentParams).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DidCloseTextDocumentParams {
+    /// The document that was closed.
+    pub text_document: TextDocumentIdentifier,
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@
 //! | [`Range`] | [Range](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range) |
 //! | [`Location`] | [Location](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#location) |
 //! | [`TextDocumentIdentifier`] | [TextDocumentIdentifier](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentIdentifier) |
+//! | [`TextDocumentItem`] | [TextDocumentItem](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentItem) |
 //! | [`TextDocumentPositionParams`] | [TextDocumentPositionParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentPositionParams) |
 //! | [`WorkspaceFolder`] | [WorkspaceFolder](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceFolder) |
 //! | [`SymbolKind`] | [SymbolKind](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolKind) |
@@ -157,6 +158,48 @@ impl Location {
 pub struct TextDocumentIdentifier {
     /// The text document's URI.
     pub uri: String,
+}
+
+/// An item to transfer a text document from the client to the server.
+///
+/// This is used in `textDocument/didOpen` notifications to provide the full content of a
+/// newly opened document.
+///
+/// # Wire Format
+///
+/// ```json
+/// {
+///   "uri": "file:///path/to/file.rs",
+///   "languageId": "rust",
+///   "version": 0,
+///   "text": "fn main() {}"
+/// }
+/// ```
+///
+/// # Fields
+///
+/// | Field | Type | Required | Description |
+/// |-------|------|----------|-------------|
+/// | `uri` | `String` | Yes | The text document's URI. LSP type: `DocumentUri`. |
+/// | `language_id` | `String` | Yes | The text document's language identifier. Wire name: `languageId`. |
+/// | `version` | `i32` | Yes | The version number of this document (it will increase after each change, including undo/redo). |
+/// | `text` | `String` | Yes | The content of the opened text document. |
+///
+/// # LSP Specification
+///
+/// See [TextDocumentItem](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentItem).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextDocumentItem {
+    /// The text document's URI.
+    pub uri: String,
+    /// The text document's language identifier.
+    pub language_id: String,
+    /// The version number of this document (it will increase after each change,
+    /// including undo/redo).
+    pub version: i32,
+    /// The content of the opened text document.
+    pub text: String,
 }
 
 /// A parameter literal used in requests to pass a text document and a position inside that document.

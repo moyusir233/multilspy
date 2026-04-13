@@ -464,8 +464,9 @@ impl RustAnalyzerServer {
 
         tracing::info!("start initialize rust analyzer lsp server");
 
-        let mut params: InitializeParams =
-            serde_json::from_str(&std::fs::read_to_string(&config.initialize_params_path)?)?;
+        let mut params: InitializeParams = serde_json::from_str(
+            &tokio::fs::read_to_string(&config.initialize_params_path).await?,
+        )?;
 
         // 填充初始化参数中必要的字段
         params.process_id = Some(std::process::id());

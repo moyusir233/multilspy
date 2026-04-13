@@ -1,4 +1,10 @@
+use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use anyhow::Context;
+use dashmap::DashMap;
+use fluent_uri::Uri;
 
 use super::config::RustAnalyzerConfig;
 use super::error::ServerError;
@@ -7,21 +13,180 @@ use multilspy_protocol::protocol::common::*;
 use multilspy_protocol::protocol::requests::*;
 use multilspy_protocol::protocol::responses::*;
 
+fn uri_to_file_path(uri: &str) -> anyhow::Result<PathBuf> {
+    let parsed = Uri::parse(uri).map_err(|e| anyhow::anyhow!("invalid URI '{}': {}", uri, e))?;
+    Ok(PathBuf::from(parsed.path().as_str()))
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+struct LSPFileBuffer {
+    uri: String,
+    contents: String,
+    version: i32,
+    language_id: String,
+    ref_count: usize,
+}
+
 #[derive(Clone)]
 pub struct LSPClient {
     server: Arc<RustAnalyzerServer>,
+    open_file_buffers: Arc<DashMap<String, LSPFileBuffer>>,
 }
 
 impl LSPClient {
     pub async fn new(config: RustAnalyzerConfig) -> anyhow::Result<Self> {
         Ok(Self {
             server: RustAnalyzerServer::start_server(config).await?,
+            open_file_buffers: Arc::new(DashMap::new()),
         })
     }
 
     pub async fn shutdown(self) -> anyhow::Result<()> {
         self.server.shutdown().await?;
         Ok(())
+    }
+
+    pub async fn open_file(&self, uri: &str) -> anyhow::Result<()> {
+        if let Some(mut entry) = self.open_file_buffers.get_mut(uri) {
+            if entry.ref_count == 0 {
+                return Err(anyhow::anyhow!(
+                    "invalid open file buffer state for {}: zero ref_count",
+                    uri
+                ));
+            }
+            entry.ref_count += 1;
+            return Ok(());
+        }
+
+        let file_path = uri_to_file_path(uri)?;
+        let contents = tokio::fs::read_to_string(&file_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to read file {}: {}", file_path.display(), e))?;
+
+        let language_id = "rust".to_string();
+        let version = 0;
+
+        let params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.to_string(),
+                language_id: language_id.clone(),
+                version,
+                text: contents.clone(),
+            },
+        };
+
+        self.server
+            .send_notification("textDocument/didOpen".to_string(), Some(params))
+            .await?;
+
+        self.open_file_buffers.insert(
+            uri.to_string(),
+            LSPFileBuffer {
+                uri: uri.to_string(),
+                contents,
+                version,
+                language_id,
+                ref_count: 1,
+            },
+        );
+
+        Ok(())
+    }
+
+    pub async fn close_file(&self, uri: &str) -> anyhow::Result<()> {
+        let should_close = {
+            let mut entry = self
+                .open_file_buffers
+                .get_mut(uri)
+                .ok_or_else(|| anyhow::anyhow!("file not open: {}", uri))?;
+            if entry.ref_count == 0 {
+                return Err(anyhow::anyhow!(
+                    "invalid open file buffer state for {}: zero ref_count",
+                    uri
+                ));
+            }
+            entry.ref_count -= 1;
+            entry.ref_count == 0
+        };
+
+        if should_close {
+            let params = DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier {
+                    uri: uri.to_string(),
+                },
+            };
+
+            if let Err(err) = self
+                .server
+                .send_notification("textDocument/didClose".to_string(), Some(params))
+                .await
+            {
+                if let Some(mut entry) = self.open_file_buffers.get_mut(uri) {
+                    entry.ref_count = 1;
+                }
+
+                return Err(anyhow::Error::from(err))
+                    .context(format!("failed to send didClose notification for {}", uri));
+            }
+
+            self.open_file_buffers.remove(uri);
+        }
+
+        Ok(())
+    }
+
+    pub fn get_open_file_text(&self, uri: &str) -> anyhow::Result<String> {
+        let entry = self
+            .open_file_buffers
+            .get(uri)
+            .ok_or_else(|| anyhow::anyhow!("file not open: {}", uri))?;
+        Ok(entry.contents.clone())
+    }
+
+    async fn with_open_file<T, F, Fut>(&self, uri: &str, op: F) -> anyhow::Result<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = anyhow::Result<T>>,
+    {
+        self.open_file(uri).await?;
+
+        let result = op().await;
+        let close_result = self.close_file(uri).await;
+
+        match (result, close_result) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(err), Ok(())) => Err(err),
+            (Ok(_), Err(close_err)) => {
+                Err(close_err.context(format!("failed to close file after request: {}", uri)))
+            }
+            (Err(err), Err(close_err)) => Err(err.context(format!(
+                "request failed and closing file also failed for {}: {}",
+                uri, close_err
+            ))),
+        }
+    }
+
+    async fn send_text_document_request<P, R>(
+        &self,
+        uri: &str,
+        method: &str,
+        params: P,
+    ) -> anyhow::Result<R>
+    where
+        P: serde::Serialize,
+        R: serde::de::DeserializeOwned,
+    {
+        let method = method.to_string();
+        self.with_open_file(uri, move || async move {
+            let result = self
+                .server
+                .send_request(method, Some(params))
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
+            Ok(serde_json::from_value(result)?)
+        })
+        .await
     }
 
     pub async fn definition(
@@ -32,19 +197,12 @@ impl LSPClient {
     ) -> anyhow::Result<DefinitionResponse> {
         let params = DefinitionParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position { line, character },
             },
         };
-
-        let result = self
-            .server
-            .send_request("textDocument/definition".to_string(), Some(params))
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let definitions = serde_json::from_value(result)?;
-
-        Ok(definitions)
+        self.send_text_document_request(&uri, "textDocument/definition", params)
+            .await
     }
 
     pub async fn type_definition(
@@ -55,19 +213,12 @@ impl LSPClient {
     ) -> anyhow::Result<TypeDefinitionResponse> {
         let params = TypeDefinitionParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position { line, character },
             },
         };
-
-        let result = self
-            .server
-            .send_request("textDocument/typeDefinition".to_string(), Some(params))
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let definitions = serde_json::from_value(result)?;
-
-        Ok(definitions)
+        self.send_text_document_request(&uri, "textDocument/typeDefinition", params)
+            .await
     }
 
     pub async fn references(
@@ -79,22 +230,15 @@ impl LSPClient {
     ) -> anyhow::Result<ReferencesResponse> {
         let params = ReferencesParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position { line, character },
             },
             context: ReferenceContext {
                 include_declaration,
             },
         };
-
-        let result = self
-            .server
-            .send_request("textDocument/references".to_string(), Some(params))
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let references = serde_json::from_value(result)?;
-
-        Ok(references)
+        self.send_text_document_request(&uri, "textDocument/references", params)
+            .await
     }
 
     pub async fn document_symbols(
@@ -102,17 +246,11 @@ impl LSPClient {
         uri: String,
     ) -> Result<DocumentSymbolResponse, ServerError> {
         let params = DocumentSymbolParams {
-            text_document: TextDocumentIdentifier { uri },
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
         };
-
-        let result = self
-            .server
-            .send_request("textDocument/documentSymbol".to_string(), Some(params))
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let symbols = serde_json::from_value(result)?;
-
-        Ok(symbols)
+        self.send_text_document_request(&uri, "textDocument/documentSymbol", params)
+            .await
+            .map_err(ServerError::from)
     }
 
     pub async fn implementation(
@@ -123,19 +261,12 @@ impl LSPClient {
     ) -> anyhow::Result<ImplementationResponse> {
         let params = ImplementationParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position { line, character },
             },
         };
-
-        let result = self
-            .server
-            .send_request("textDocument/implementation".to_string(), Some(params))
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let implementations = serde_json::from_value(result)?;
-
-        Ok(implementations)
+        self.send_text_document_request(&uri, "textDocument/implementation", params)
+            .await
     }
 
     pub async fn prepare_call_hierarchy(
@@ -146,22 +277,12 @@ impl LSPClient {
     ) -> anyhow::Result<CallHierarchyPrepareResponse> {
         let params = CallHierarchyPrepareParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position { line, character },
             },
         };
-
-        let result = self
-            .server
-            .send_request(
-                "textDocument/prepareCallHierarchy".to_string(),
-                Some(params),
-            )
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let items = serde_json::from_value(result)?;
-
-        Ok(items)
+        self.send_text_document_request(&uri, "textDocument/prepareCallHierarchy", params)
+            .await
     }
 
     pub async fn incoming_calls(

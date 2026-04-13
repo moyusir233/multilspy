@@ -72,6 +72,53 @@ async fn test_new_with_invalid_initialize_params_path() {
     assert!(result.is_err());
 }
 
+#[tokio::test]
+async fn test_open_file_reference_count_and_close() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+    let uri = file_uri();
+
+    client.open_file(&uri).await.unwrap();
+    client.open_file(&uri).await.unwrap();
+
+    let text = client.get_open_file_text(&uri).unwrap();
+    assert!(text.contains("fn main()"));
+
+    client.close_file(&uri).await.unwrap();
+    assert!(
+        client.get_open_file_text(&uri).is_ok(),
+        "buffer should remain open until the last close"
+    );
+
+    client.close_file(&uri).await.unwrap();
+    assert!(
+        client.get_open_file_text(&uri).is_err(),
+        "buffer should be removed after the final close"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_definition_does_not_leak_open_file_buffer() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+    let uri = file_uri();
+
+    let result = client.definition(uri.clone(), 35, 12).await.unwrap();
+    assert!(!result.is_empty());
+    assert!(
+        client.get_open_file_text(&uri).is_err(),
+        "definition should close the temporary open file buffer"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // LSPClient::definition
 // ---------------------------------------------------------------------------

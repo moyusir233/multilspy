@@ -91,10 +91,7 @@ fn release_lock(file: &File) {
     }
 }
 
-pub async fn ensure_daemon(
-    workspace: &Path,
-    initialize_params_path: &Path,
-) -> anyhow::Result<u16> {
+pub async fn ensure_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow::Result<u16> {
     let canonical = workspace
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
@@ -155,16 +152,16 @@ async fn spawn_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow
 
     for attempt in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        if let Some(info) = read_pidfile(workspace) {
-            if ipc::ping(info.port).await {
-                tracing::info!(
-                    "daemon started: pid={}, port={} (attempt {})",
-                    info.pid,
-                    info.port,
-                    attempt
-                );
-                return Ok(info.port);
-            }
+        if let Some(info) = read_pidfile(workspace)
+            && ipc::ping(info.port).await
+        {
+            tracing::info!(
+                "daemon started: pid={}, port={} (attempt {})",
+                info.pid,
+                info.port,
+                attempt
+            );
+            return Ok(info.port);
         }
     }
 
