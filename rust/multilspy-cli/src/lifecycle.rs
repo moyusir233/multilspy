@@ -150,8 +150,8 @@ async fn spawn_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow
 
     cmd.spawn()?;
 
-    for attempt in 0..60 {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    for attempt in 0..120 {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         if let Some(info) = read_pidfile(workspace)
             && ipc::ping(info.port).await
         {
