@@ -17,7 +17,7 @@ fn rust_analyzer_available() -> bool {
 }
 
 fn cli_binary_path() -> PathBuf {
-    let path = PathBuf::from(env!("CARGO_BIN_EXE_multilspy"));
+    let path = PathBuf::from(env!("CARGO_BIN_EXE_ra-lsp"));
     assert!(path.exists(), "multilspy binary must exist at {:?}", path);
     path
 }
