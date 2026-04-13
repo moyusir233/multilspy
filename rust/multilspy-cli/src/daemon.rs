@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use crate::ipc::*;
 use crate::lifecycle;
 
-const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(300);
+const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(7200);
 
 struct DaemonState {
     client: LSPClient,
@@ -61,6 +61,8 @@ pub async fn run_daemon(
     let shutdown_for_timeout = shutdown_notify.clone();
     tokio::spawn(async move {
         loop {
+            // Check inactivity timeout every 30 seconds
+            // if last activity is older than INACTIVITY_TIMEOUT, shutdown
             tokio::time::sleep(Duration::from_secs(30)).await;
             let last = *state_for_timeout.last_activity.lock().await;
             if last.elapsed() >= INACTIVITY_TIMEOUT {

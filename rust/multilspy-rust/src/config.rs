@@ -98,7 +98,7 @@ mod tests {
             config.server_executable_path,
             Path::new("/usr/bin/rust-analyzer")
         );
-        assert_eq!(config.env.len(), 1);
+        assert_eq!(config.env.len(), 2);
         assert_eq!(config.env[0], ("RUST_LOG".to_string(), "info".to_string()));
     }
 }
