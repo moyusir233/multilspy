@@ -95,6 +95,7 @@ pub async fn ensure_daemon(
     workspace: &Path,
     initialize_params_path: &Path,
     wait_work_done_progress_create_max_time_secs: Option<u64>,
+    is_shutdown_server_cmd: bool,
 ) -> anyhow::Result<u16> {
     let canonical = workspace
         .canonicalize()
@@ -106,6 +107,7 @@ pub async fn ensure_daemon(
         &canonical,
         initialize_params_path,
         wait_work_done_progress_create_max_time_secs,
+        is_shutdown_server_cmd,
     )
     .await;
 
@@ -119,6 +121,7 @@ async fn ensure_daemon_inner(
     canonical: &Path,
     initialize_params_path: &Path,
     wait_work_done_progress_create_max_time_secs: Option<u64>,
+    is_shutdown_server_cmd: bool,
 ) -> anyhow::Result<u16> {
     if let Some(info) = read_pidfile(canonical) {
         if is_process_alive(info.pid) && ipc::ping(info.port).await {
@@ -131,6 +134,11 @@ async fn ensure_daemon_inner(
         }
         tracing::info!("stale daemon detected, cleaning up pidfile");
         let _ = remove_pidfile(canonical);
+    }
+
+    // if cmd is shutdown server, no need to spawn daemon, return 0 port
+    if is_shutdown_server_cmd {
+        return Ok(0);
     }
 
     spawn_daemon(

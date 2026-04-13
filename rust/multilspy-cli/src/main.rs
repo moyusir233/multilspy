@@ -504,10 +504,16 @@ async fn run_client_command(
         &workspace,
         initialize_params.path(),
         wait_work_done_progress_create_max_time_secs,
+        matches!(&cmd, Command::Stop),
     )
     .await
     {
-        Ok(p) => p,
+        Ok(p) => {
+            if p == 0 && matches!(&cmd, Command::Stop) {
+                return ExitCode::SUCCESS;
+            }
+            p
+        }
         Err(e) => {
             output_error(-1, format!("failed to connect to daemon: {}", e));
             return ExitCode::FAILURE;
@@ -678,15 +684,17 @@ fn resolve_relative_path_to_file_uri(input_path: &Path) -> anyhow::Result<String
         cwd.join(input_path)
     };
 
-    let canonical_path = resolved_path.canonicalize().map_err(|e| {
-        format_path_resolution_error(input_path, &resolved_path, e)
-    })?;
-    Url::from_file_path(&canonical_path).map_err(|()| {
-        anyhow::anyhow!(
-            "failed to convert path '{}' to a valid file:// URI",
-            canonical_path.display()
-        )
-    }).map(|url| url.to_string())
+    let canonical_path = resolved_path
+        .canonicalize()
+        .map_err(|e| format_path_resolution_error(input_path, &resolved_path, e))?;
+    Url::from_file_path(&canonical_path)
+        .map_err(|()| {
+            anyhow::anyhow!(
+                "failed to convert path '{}' to a valid file:// URI",
+                canonical_path.display()
+            )
+        })
+        .map(|url| url.to_string())
 }
 
 fn format_path_resolution_error(
@@ -788,12 +796,10 @@ fn validate_initialize_params_file(path: &Path, source: &str) -> anyhow::Result<
 }
 
 fn load_initialize_params_value(path: &Path, source: &str) -> anyhow::Result<serde_json::Value> {
-    let _metadata = fs::metadata(path).map_err(|error| {
-        format_initialize_params_io_error(path, source, "access", error)
-    })?;
-    let content = fs::read_to_string(path).map_err(|error| {
-        format_initialize_params_io_error(path, source, "read", error)
-    })?;
+    let _metadata = fs::metadata(path)
+        .map_err(|error| format_initialize_params_io_error(path, source, "access", error))?;
+    let content = fs::read_to_string(path)
+        .map_err(|error| format_initialize_params_io_error(path, source, "read", error))?;
     serde_json::from_str(&content).map_err(|error| {
         anyhow::anyhow!(
             "invalid JSON in initialize params file from {} at '{}': {}",
@@ -1023,7 +1029,11 @@ mod tests {
             std::env::set_var(INIT_PARAMS_ENV_VAR, &invalid_path);
         }
         let error = resolve_initialize_params_path(&workspace, None).unwrap_err();
-        assert!(error.to_string().contains("invalid initialize params structure"));
+        assert!(
+            error
+                .to_string()
+                .contains("invalid initialize params structure")
+        );
 
         unsafe {
             std::env::remove_var(INIT_PARAMS_ENV_VAR);
