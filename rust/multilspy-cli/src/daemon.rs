@@ -33,17 +33,18 @@ pub async fn run_daemon(
         None => RustAnalyzerConfig::new(workspace.clone(), initialize_params_path),
     };
 
-    tracing::info!("daemon: initializing LSPClient for {:?}", workspace);
-    let client = LSPClient::new(config).await?;
-    tracing::info!("daemon: LSPClient ready");
-
+    let canonical = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     let pid = std::process::id();
-
-    let canonical = workspace.canonicalize().unwrap_or_else(|_| workspace.clone());
     lifecycle::write_pidfile(&canonical, pid, port)?;
     tracing::info!("daemon: listening on 127.0.0.1:{}, pid={}", port, pid);
+
+    tracing::info!("daemon: initializing LSPClient for {:?}", workspace);
+    let client = LSPClient::new(config).await?;
+    tracing::info!("daemon: LSPClient ready");
 
     let now = Instant::now();
     let state = Arc::new(DaemonState {
@@ -290,10 +291,7 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
             }
         }
 
-        other => IpcResponse::error(
-            ERR_METHOD_NOT_FOUND,
-            format!("unknown method: {}", other),
-        ),
+        other => IpcResponse::error(ERR_METHOD_NOT_FOUND, format!("unknown method: {}", other)),
     }
 }
 
