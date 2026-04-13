@@ -38,7 +38,7 @@ impl RustAnalyzerConfig {
                 .unwrap_or(initialize_params_path),
             // 默认使用`bash -c "which rust-analyzer"`来获得rust-analyzer的路径
             server_executable_path: get_rust_analyzer_path().unwrap_or_default(),
-            env: Vec::new(),
+            env: vec![("RA_LOG".to_string(), "info".to_string())],
             ra_stderr_log_path: None,
             wait_work_done_progress_create_max_time: Duration::from_secs(30),
         };
@@ -51,6 +51,8 @@ impl RustAnalyzerConfig {
                 config.initialize_params_path = current_dir.join(&config.initialize_params_path);
             }
         }
+
+        config.ra_stderr_log_path = Some(config.project_root.join("multilspy-ra.log"));
 
         config
     }
