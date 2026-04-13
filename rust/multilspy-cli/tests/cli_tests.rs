@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
@@ -116,12 +117,79 @@ fn assert_error_response(stdout: &str) -> Value {
 }
 
 fn stop_daemon() {
+    let status_out = run_cli(&["status"]);
+    let pid = serde_json::from_str::<Value>(status_out.stdout.trim())
+        .ok()
+        .and_then(|v| v["result"]["pid"].as_u64())
+        .map(|p| p as i32);
+
     let _ = run_cli(&["stop"]);
-    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    if let Some(pid) = pid {
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let alive = unsafe { libc::kill(pid, 0) == 0 };
+            if !alive {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                return;
+            }
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_secs(2));
 }
 
 // ---------------------------------------------------------------------------
-// CLI help and version — no daemon required
+// File-lock based test serialization
+//
+// Read-only daemon tests (definition, references, etc.) take a SHARED lock
+// so they can run concurrently with each other while reusing the same daemon.
+//
+// Destructive tests (stop, respawn, perf benchmark) take an EXCLUSIVE lock
+// so no other test can interact with the daemon while it is being torn down.
+// ---------------------------------------------------------------------------
+
+fn daemon_test_lock_path() -> PathBuf {
+    std::env::temp_dir()
+        .join("multilspy-cli")
+        .join("_test_daemon.lock")
+}
+
+struct DaemonTestGuard {
+    _file: File,
+}
+
+fn acquire_shared_daemon_lock() -> DaemonTestGuard {
+    std::fs::create_dir_all(daemon_test_lock_path().parent().unwrap()).ok();
+    let file = File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(daemon_test_lock_path())
+        .expect("failed to open test lock file");
+
+    use std::os::unix::io::AsRawFd;
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) };
+    assert_eq!(rc, 0, "failed to acquire shared test lock");
+    DaemonTestGuard { _file: file }
+}
+
+fn acquire_exclusive_daemon_lock() -> DaemonTestGuard {
+    std::fs::create_dir_all(daemon_test_lock_path().parent().unwrap()).ok();
+    let file = File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(daemon_test_lock_path())
+        .expect("failed to open test lock file");
+
+    use std::os::unix::io::AsRawFd;
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    assert_eq!(rc, 0, "failed to acquire exclusive test lock");
+    DaemonTestGuard { _file: file }
+}
+
+// ---------------------------------------------------------------------------
+// CLI help and version — no daemon required, no lock needed
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -217,7 +285,7 @@ fn test_unknown_subcommand() {
 }
 
 // ---------------------------------------------------------------------------
-// JSON output structure validation
+// JSON output structure validation — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -225,6 +293,7 @@ fn test_output_is_valid_json() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -245,6 +314,7 @@ fn test_success_response_has_result_field() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -265,7 +335,7 @@ fn test_success_response_has_result_field() {
 }
 
 // ---------------------------------------------------------------------------
-// definition command
+// definition command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -273,6 +343,7 @@ fn test_definition_of_function_call() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -300,6 +371,7 @@ fn test_definition_of_trait_method_call() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -322,6 +394,7 @@ fn test_definition_of_struct_field() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -344,6 +417,7 @@ fn test_definition_at_definition_site_points_to_self() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -362,7 +436,7 @@ fn test_definition_at_definition_site_points_to_self() {
 }
 
 // ---------------------------------------------------------------------------
-// type-definition command
+// type-definition command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -370,6 +444,7 @@ fn test_type_definition_of_variable() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "type-definition",
@@ -393,6 +468,7 @@ fn test_type_definition_of_function_return() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "type-definition",
@@ -410,7 +486,7 @@ fn test_type_definition_of_function_return() {
 }
 
 // ---------------------------------------------------------------------------
-// implementation command
+// implementation command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -418,6 +494,7 @@ fn test_implementation_of_trait() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "implementation",
@@ -452,6 +529,7 @@ fn test_implementation_of_trait_method() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "implementation",
@@ -479,6 +557,7 @@ fn test_implementation_of_struct() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "implementation",
@@ -501,7 +580,7 @@ fn test_implementation_of_struct() {
 }
 
 // ---------------------------------------------------------------------------
-// references command
+// references command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -509,6 +588,7 @@ fn test_references_include_declaration() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -542,6 +622,7 @@ fn test_references_exclude_declaration() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -570,6 +651,7 @@ fn test_references_of_trait_method() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -593,7 +675,7 @@ fn test_references_of_trait_method() {
 }
 
 // ---------------------------------------------------------------------------
-// document-symbols command
+// document-symbols command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -601,6 +683,7 @@ fn test_document_symbols() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -629,6 +712,7 @@ fn test_document_symbols_kinds() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -650,6 +734,7 @@ fn test_document_symbols_children() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -666,7 +751,7 @@ fn test_document_symbols_children() {
 }
 
 // ---------------------------------------------------------------------------
-// incoming-calls command
+// incoming-calls command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -674,6 +759,7 @@ fn test_incoming_calls() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls",
@@ -704,6 +790,7 @@ fn test_incoming_calls_of_leaf_function() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls",
@@ -724,7 +811,7 @@ fn test_incoming_calls_of_leaf_function() {
 }
 
 // ---------------------------------------------------------------------------
-// outgoing-calls command
+// outgoing-calls command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -732,6 +819,7 @@ fn test_outgoing_calls() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls",
@@ -760,6 +848,7 @@ fn test_outgoing_calls_of_leaf() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls",
@@ -780,7 +869,7 @@ fn test_outgoing_calls_of_leaf() {
 }
 
 // ---------------------------------------------------------------------------
-// incoming-calls-recursive command
+// incoming-calls-recursive command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -788,6 +877,7 @@ fn test_incoming_calls_recursive() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls-recursive",
@@ -833,6 +923,7 @@ fn test_incoming_calls_recursive_with_depth_limit() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls-recursive",
@@ -871,6 +962,7 @@ fn test_incoming_calls_recursive_without_max_depth() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls-recursive",
@@ -888,7 +980,7 @@ fn test_incoming_calls_recursive_without_max_depth() {
 }
 
 // ---------------------------------------------------------------------------
-// outgoing-calls-recursive command
+// outgoing-calls-recursive command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -896,6 +988,7 @@ fn test_outgoing_calls_recursive() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls-recursive",
@@ -941,6 +1034,7 @@ fn test_outgoing_calls_recursive_with_depth_limit() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls-recursive",
@@ -975,7 +1069,7 @@ fn test_outgoing_calls_recursive_with_depth_limit() {
 }
 
 // ---------------------------------------------------------------------------
-// Daemon lifecycle: status, stop, auto-spawn
+// Daemon lifecycle: status, stop, auto-spawn — EXCLUSIVE daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -983,6 +1077,7 @@ fn test_status_command() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&["status"]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let result = assert_success_result(&out.stdout);
@@ -1000,6 +1095,7 @@ fn test_stop_and_auto_respawn() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_exclusive_daemon_lock();
     stop_daemon();
 
     let uri = file_uri();
@@ -1027,6 +1123,7 @@ fn test_subsequent_command_faster_than_first() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_exclusive_daemon_lock();
     stop_daemon();
 
     let uri = file_uri();
@@ -1064,7 +1161,7 @@ fn test_subsequent_command_faster_than_first() {
 }
 
 // ---------------------------------------------------------------------------
-// Edge cases — invalid URIs, out-of-range positions
+// Edge cases — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1072,6 +1169,7 @@ fn test_definition_at_whitespace_returns_empty() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -1096,6 +1194,7 @@ fn test_definition_out_of_range_position() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -1118,6 +1217,7 @@ fn test_definition_with_invalid_uri() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&[
         "definition",
         "--uri",
@@ -1139,6 +1239,7 @@ fn test_document_symbols_with_invalid_uri() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&[
         "document-symbols",
         "--uri",
@@ -1156,6 +1257,7 @@ fn test_references_on_keyword_returns_empty_or_ok() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -1173,7 +1275,7 @@ fn test_references_on_keyword_returns_empty_or_ok() {
 }
 
 // ---------------------------------------------------------------------------
-// Multiple sequential commands reuse daemon
+// Multiple sequential commands reuse daemon — shared daemon lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1181,6 +1283,7 @@ fn test_multiple_commands_same_daemon() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
 
     let out1 = run_cli(&["status"]);
@@ -1219,5 +1322,6 @@ fn test_zz_cleanup_stop_daemon() {
     if !rust_analyzer_available() {
         return;
     }
+    let _guard = acquire_exclusive_daemon_lock();
     stop_daemon();
 }

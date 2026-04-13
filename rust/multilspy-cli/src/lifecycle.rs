@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use crate::ipc;
@@ -22,6 +23,10 @@ fn pidfile_dir() -> PathBuf {
 
 fn pidfile_path(workspace: &Path) -> PathBuf {
     pidfile_dir().join(format!("{}.json", workspace_hash(workspace)))
+}
+
+fn lockfile_path(workspace: &Path) -> PathBuf {
+    pidfile_dir().join(format!("{}.lock", workspace_hash(workspace)))
 }
 
 pub fn write_pidfile(workspace: &Path, pid: u32, port: u16) -> anyhow::Result<()> {
@@ -58,6 +63,34 @@ fn is_process_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
+fn acquire_lock(workspace: &Path) -> anyhow::Result<File> {
+    std::fs::create_dir_all(pidfile_dir())?;
+    let lock_path = lockfile_path(workspace);
+    let file = File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+
+    use std::os::unix::io::AsRawFd;
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if rc != 0 {
+        anyhow::bail!(
+            "failed to acquire lock on {:?}: {}",
+            lock_path,
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(file)
+}
+
+fn release_lock(file: &File) {
+    use std::os::unix::io::AsRawFd;
+    unsafe {
+        libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+    }
+}
+
 pub async fn ensure_daemon(
     workspace: &Path,
     initialize_params_path: &Path,
@@ -66,7 +99,21 @@ pub async fn ensure_daemon(
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
 
-    if let Some(info) = read_pidfile(&canonical) {
+    let lock = acquire_lock(&canonical)?;
+
+    let result = ensure_daemon_inner(&canonical, initialize_params_path).await;
+
+    release_lock(&lock);
+    drop(lock);
+
+    result
+}
+
+async fn ensure_daemon_inner(
+    canonical: &Path,
+    initialize_params_path: &Path,
+) -> anyhow::Result<u16> {
+    if let Some(info) = read_pidfile(canonical) {
         if is_process_alive(info.pid) && ipc::ping(info.port).await {
             tracing::debug!(
                 "daemon already running: pid={}, port={}",
@@ -76,10 +123,10 @@ pub async fn ensure_daemon(
             return Ok(info.port);
         }
         tracing::info!("stale daemon detected, cleaning up pidfile");
-        let _ = remove_pidfile(&canonical);
+        let _ = remove_pidfile(canonical);
     }
 
-    spawn_daemon(&canonical, initialize_params_path).await
+    spawn_daemon(canonical, initialize_params_path).await
 }
 
 async fn spawn_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow::Result<u16> {
