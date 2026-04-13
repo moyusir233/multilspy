@@ -55,6 +55,21 @@ fn workspace_args() -> Vec<String> {
     ]
 }
 
+fn unique_temp_dir(name: &str) -> PathBuf {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "multilspy-cli-integration-{}-{}-{}",
+        name,
+        std::process::id(),
+        timestamp
+    ));
+    std::fs::create_dir_all(&dir).expect("failed to create temp dir");
+    dir
+}
+
 struct CliOutput {
     status: std::process::ExitStatus,
     stdout: String,
@@ -78,10 +93,27 @@ fn run_cli(args: &[&str]) -> CliOutput {
     }
 }
 
-fn run_cli_raw(args: &[&str]) -> CliOutput {
+fn run_cli_with_options(
+    args: &[&str],
+    include_workspace_args: bool,
+    cwd: Option<&std::path::Path>,
+    envs: &[(&str, &str)],
+) -> CliOutput {
+    let ws = workspace_args();
     let mut cmd = Command::new(cli_binary_path());
+    if include_workspace_args {
+        for a in &ws {
+            cmd.arg(a);
+        }
+    }
     for a in args {
         cmd.arg(a);
+    }
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
+    for (key, value) in envs {
+        cmd.env(key, value);
     }
     let output = cmd.output().expect("failed to execute multilspy binary");
     CliOutput {
@@ -89,6 +121,18 @@ fn run_cli_raw(args: &[&str]) -> CliOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     }
+}
+
+fn run_cli_raw(args: &[&str]) -> CliOutput {
+    run_cli_with_options(args, false, None, &[])
+}
+
+fn run_cli_raw_with_env(args: &[&str], envs: &[(&str, &str)]) -> CliOutput {
+    run_cli_with_options(args, false, None, envs)
+}
+
+fn run_cli_in_dir(args: &[&str], cwd: &std::path::Path) -> CliOutput {
+    run_cli_with_options(args, true, Some(cwd), &[])
 }
 
 fn parse_ipc_response(stdout: &str) -> Value {
@@ -200,6 +244,9 @@ fn test_help_flag() {
     assert!(out.status.success());
     assert!(out.stdout.contains("LSP CLI for AI agents"));
     assert!(out.stdout.contains("--wait-work-done-progress-create-max-time"));
+    assert!(out.stdout.contains("RA_LSP_INIT_PARAMS_PATH"));
+    assert!(out.stdout.contains("--relative-path"));
+    assert!(out.stdout.contains("JSON Output"));
     assert!(out.stdout.contains("definition"));
     assert!(out.stdout.contains("type-definition"));
     assert!(out.stdout.contains("implementation"));
@@ -225,8 +272,12 @@ fn test_subcommand_help_definition() {
     let out = run_cli_raw(&["definition", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--uri"));
+    assert!(out.stdout.contains("--relative-path"));
     assert!(out.stdout.contains("--line"));
     assert!(out.stdout.contains("--character"));
+    assert!(out.stdout.contains("RA_LSP_INIT_PARAMS_PATH"));
+    assert!(out.stdout.contains("JSON Output"));
+    assert!(out.stdout.contains("Location[]"));
 }
 
 #[test]
@@ -241,6 +292,18 @@ fn test_subcommand_help_incoming_calls_recursive() {
     let out = run_cli_raw(&["incoming-calls-recursive", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--max-depth"));
+    assert!(out.stdout.contains("--relative-path"));
+    assert!(out.stdout.contains("[[CallHierarchyItem, CallHierarchyIncomingCall[]], ...]"));
+}
+
+#[test]
+fn test_subcommand_help_status() {
+    let out = run_cli_raw(&["status", "--help"]);
+    assert!(out.status.success());
+    assert!(out.stdout.contains("RA_LSP_INIT_PARAMS_PATH"));
+    assert!(out.stdout.contains("JSON Output"));
+    assert!(out.stdout.contains("\"workspace\": string"));
+    assert!(out.stdout.contains("--relative-path` is not applicable to `status`"));
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +348,63 @@ fn test_definition_missing_character() {
 fn test_unknown_subcommand() {
     let out = run_cli_raw(&["nonexistent-command"]);
     assert!(!out.status.success());
+}
+
+#[test]
+fn test_definition_conflicting_uri_and_relative_path() {
+    let out = run_cli_raw(&[
+        "definition",
+        "--uri",
+        "file:///test.rs",
+        "--relative-path",
+        "src/main.rs",
+        "--line",
+        "0",
+        "--character",
+        "0",
+    ]);
+    assert!(!out.status.success());
+    assert!(out.stderr.contains("--relative-path"));
+    assert!(out.stderr.contains("--uri"));
+}
+
+#[test]
+fn test_invalid_env_initialize_params_file_returns_json_error() {
+    let missing_dir = unique_temp_dir("missing-init");
+    let missing_path = missing_dir.join("missing.json");
+    let workspace = test_project_root();
+    let workspace_arg = workspace.display().to_string();
+    let missing_path_arg = missing_path.display().to_string();
+
+    let out = run_cli_raw_with_env(
+        &["--workspace", &workspace_arg, "status"],
+        &[("RA_LSP_INIT_PARAMS_PATH", &missing_path_arg)],
+    );
+    assert!(!out.status.success());
+    let error = assert_error_response(&out.stdout);
+    assert!(error["message"].as_str().unwrap().contains("file does not exist"));
+
+    std::fs::remove_dir_all(missing_dir).unwrap();
+}
+
+#[test]
+fn test_invalid_env_initialize_params_json_returns_json_error() {
+    let dir = unique_temp_dir("invalid-init-json");
+    let invalid_path = dir.join("invalid.json");
+    std::fs::write(&invalid_path, "{invalid json").unwrap();
+    let workspace = test_project_root();
+    let workspace_arg = workspace.display().to_string();
+    let invalid_path_arg = invalid_path.display().to_string();
+
+    let out = run_cli_raw_with_env(
+        &["--workspace", &workspace_arg, "status"],
+        &[("RA_LSP_INIT_PARAMS_PATH", &invalid_path_arg)],
+    );
+    assert!(!out.status.success());
+    let error = assert_error_response(&out.stdout);
+    assert!(error["message"].as_str().unwrap().contains("invalid JSON"));
+
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +487,36 @@ fn test_definition_of_function_call() {
         "location should be in main.rs"
     );
     assert_eq!(loc["range"]["start"]["line"], 24);
+}
+
+#[test]
+fn test_definition_with_relative_path() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_shared_daemon_lock();
+    let workspace = test_project_root();
+    let out = run_cli_in_dir(
+        &[
+            "definition",
+            "--relative-path",
+            "src/main.rs",
+            "--line",
+            "35",
+            "--character",
+            "12",
+        ],
+        &workspace,
+    );
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let locations = result.as_array().expect("result should be an array");
+    assert!(!locations.is_empty(), "should return at least one location");
+    assert!(
+        locations[0]["uri"].as_str().unwrap().ends_with("main.rs"),
+        "location should be in main.rs"
+    );
+    assert_eq!(locations[0]["range"]["start"]["line"], 24);
 }
 
 #[test]
