@@ -18,7 +18,7 @@ jobs:
         with:
           toolchain: stable
           override: true
-          components: clippy
+          components: clippy, rust-analyzer
 
       - name: Build
         run: |
@@ -29,3 +29,8 @@ jobs:
         run: |
           cd rust
           ./target/release/ra-lsp -h
+
+      - name: Run CLI Command
+        run: |
+          cd rust
+          $(pwd)/target/release/ra-lsp -w $(pwd)/multilspy-rust/test-rust-project -i $(pwd)/multilspy-rust/ra_initialize_params.json outgoing-calls-recursive --uri file://$(pwd)/multilspy-rust/test-rust-project/src/main.rs --line 34 --character 3 --max-depth 4
