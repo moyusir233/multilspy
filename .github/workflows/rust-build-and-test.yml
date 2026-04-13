@@ -20,6 +20,10 @@ jobs:
           override: true
           components: clippy, rust-analyzer
 
+      - name: Clippy
+        run: |
+          cd rust && cargo clippy --all --all-features
+
       - name: Cargo test
         run: |
           cd rust && cargo test

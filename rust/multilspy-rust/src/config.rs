@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn test_config_builder() {
         let project_root = Path::new("/test/project");
-        let config = RustAnalyzerConfig::new(
+        let mut config = RustAnalyzerConfig::new(
             project_root.to_path_buf(),
             PathBuf::from("ra_initialize_params.json"),
         )
@@ -98,7 +98,16 @@ mod tests {
             config.server_executable_path,
             Path::new("/usr/bin/rust-analyzer")
         );
-        assert_eq!(config.env.len(), 2);
-        assert_eq!(config.env[0], ("RUST_LOG".to_string(), "info".to_string()));
+
+        let mut expected_env = vec![
+            ("RUST_LOG".to_string(), "info".to_string()),
+            ("RA_LOG".to_string(), "info".to_string()),
+        ];
+        assert_eq!(config.env.len(), expected_env.len());
+
+        expected_env.sort();
+        config.env.sort();
+
+        assert_eq!(config.env, expected_env);
     }
 }
