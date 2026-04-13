@@ -1,7 +1,10 @@
 //! Rust Analyzer LSP client library
 
-pub mod config;
-pub mod error;
-pub mod client;
-pub mod server;
-pub mod logic;
+pub(crate) mod client;
+pub(crate) mod config;
+pub(crate) mod error;
+pub(crate) mod logic;
+pub(crate) mod server;
+
+pub use client::LSPClient;
+pub use config::RustAnalyzerConfig;

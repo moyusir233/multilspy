@@ -1,15 +1,22 @@
 [package]
-name = "multilspy-rust"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+name             ="multilspy-rust"
+version.workspace=true
+edition.workspace=true
+authors.workspace=true
+license.workspace=true
 
 [dependencies]
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-multilspy-protocol = { path = "../multilspy-protocol" }
+tokio.workspace     =true
+serde.workspace     =true
+serde_json.workspace=true
+thiserror.workspace =true
+anyhow.workspace    =true
+tracing.workspace   =true
+fluent-uri.workspace=true
+
+multilspy-protocol.workspace=true
+dashmap                     ="6.1.0"
+futures-lite                ="2.6.1"
+
+[dev-dependencies]
+tracing-subscriber.workspace=true

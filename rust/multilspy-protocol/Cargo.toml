@@ -1,14 +1,15 @@
 [package]
-name = "multilspy-protocol"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+name             ="multilspy-protocol"
+version.workspace=true
+edition.workspace=true
+authors.workspace=true
+license.workspace=true
 
 [dependencies]
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-fluent-uri = "0.4.1"
+tokio.workspace=true
+serde.workspace=true
+serde_json.workspace=true
+thiserror.workspace=true
+tracing.workspace=true
+fluent-uri.workspace=true
+derive_more={ version = "2.1.1", features = ["from", "try_into"] }

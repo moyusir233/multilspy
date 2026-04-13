@@ -97,7 +97,7 @@ pub struct Request {
     /// The method to be invoked (e.g., `"textDocument/definition"`).
     pub method: String,
     /// The method's params.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
@@ -203,7 +203,7 @@ pub struct ResponseError {
     /// A string providing a short description of the error.
     pub message: String,
     /// A primitive or structured value that contains additional information about the error.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 }
 
@@ -239,7 +239,7 @@ pub struct Notification {
     /// The notification method (e.g., `"textDocument/didOpen"`, `"initialized"`, `"exit"`).
     pub method: String,
     /// The notification's params.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
@@ -272,6 +272,16 @@ impl Response {
                 message,
                 data,
             })),
+        }
+    }
+}
+
+impl Notification {
+    pub fn new(method: String, params: Option<Value>) -> Self {
+        Self {
+            jsonrpc: JSONRPC_VERSION.to_string(),
+            method,
+            params,
         }
     }
 }

@@ -1,54 +1,62 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RustAnalyzerConfig {
     /// Path to rust-analyzer executable
-    pub server_path: PathBuf,
-
+    pub server_executable_path: PathBuf,
     /// Root directory of the Rust project
     pub project_root: PathBuf,
-
     /// Additional environment variables to pass to rust-analyzer
     pub env: Vec<(String, String)>,
-
-    /// Rust analyzer configuration settings
-    pub settings: serde_json::Value,
+    /// Rust analyzer stderr log file path
+    /// If not set, the log will be printed to the console.
+    pub ra_stderr_log_path: Option<PathBuf>,
+    /// InitializeParams json file path
+    pub initialize_params_path: PathBuf,
+    /// 等待lsp server发起workdoneProgress创建请求的最大时间窗口，默认60秒
+    pub wait_work_done_progress_create_max_time: Duration,
 }
 
-impl Default for RustAnalyzerConfig {
-    fn default() -> Self {
-        Self {
-            server_path: PathBuf::from("rust-analyzer"),
-            project_root: std::env::current_dir().unwrap_or_default(),
-            env: Vec::new(),
-            settings: serde_json::json!({
-                "rust-analyzer": {
-                    "diagnostics": {
-                        "enable": true
-                    },
-                    "procMacro": {
-                        "enable": true
-                    },
-                    "cargo": {
-                        "loadOutDirsFromCheck": true
-                    }
-                }
-            }),
-        }
-    }
+fn get_rust_analyzer_path() -> anyhow::Result<PathBuf> {
+    let output = std::process::Command::new("bash")
+        .arg("-c")
+        .arg("which rust-analyzer")
+        .output()
+        .map_err(|e| anyhow::anyhow!("Failed to get rust-analyzer path: {:?}", e))?;
+    let path = String::from_utf8_lossy(&output.stdout);
+    let path_buf = PathBuf::from(path.as_ref().trim());
+    Ok(path_buf)
 }
 
 impl RustAnalyzerConfig {
-    pub fn new(project_root: PathBuf) -> Self {
-        Self {
-            project_root,
-            ..Default::default()
+    pub fn new(project_root: PathBuf, initialize_params_path: PathBuf) -> Self {
+        let mut config = Self {
+            project_root: project_root.canonicalize().unwrap_or(project_root),
+            initialize_params_path: initialize_params_path
+                .canonicalize()
+                .unwrap_or(initialize_params_path),
+            // 默认使用`bash -c "which rust-analyzer"`来获得rust-analyzer的路径
+            server_executable_path: get_rust_analyzer_path().unwrap_or_default(),
+            env: Vec::new(),
+            ra_stderr_log_path: None,
+            wait_work_done_progress_create_max_time: Duration::from_secs(10),
+        };
+
+        if let Ok(current_dir) = std::env::current_dir() {
+            if config.project_root.starts_with(".") {
+                config.project_root = current_dir.join(&config.project_root);
+            }
+            if config.initialize_params_path.starts_with(".") {
+                config.initialize_params_path = current_dir.join(&config.initialize_params_path);
+            }
         }
+
+        config
     }
 
     pub fn with_server_path(mut self, server_path: PathBuf) -> Self {
-        self.server_path = server_path;
+        self.server_executable_path = server_path;
         self
     }
 
@@ -57,10 +65,8 @@ impl RustAnalyzerConfig {
         self
     }
 
-    pub fn with_setting(mut self, key: String, value: serde_json::Value) -> Self {
-        if let Some(serde_json::Value::Object(map)) = self.settings.get_mut("rust-analyzer") {
-            map.insert(key, value);
-        }
+    pub fn with_stderr_log_path(mut self, path: PathBuf) -> Self {
+        self.ra_stderr_log_path = Some(path);
         self
     }
 }
@@ -71,22 +77,20 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn test_config_default() {
-        let config = RustAnalyzerConfig::default();
-        assert_eq!(config.server_path, Path::new("rust-analyzer"));
-        assert!(config.settings.get("rust-analyzer").is_some());
-    }
-
-    #[test]
     fn test_config_builder() {
         let project_root = Path::new("/test/project");
-        let config = RustAnalyzerConfig::new(project_root.to_path_buf())
-            .with_server_path(Path::new("/usr/bin/rust-analyzer").to_path_buf())
-            .with_env("RUST_LOG".to_string(), "info".to_string())
-            .with_setting("diagnostics.enable".to_string(), serde_json::json!(false));
+        let config = RustAnalyzerConfig::new(
+            project_root.to_path_buf(),
+            PathBuf::from("ra_initialize_params.json"),
+        )
+        .with_server_path(Path::new("/usr/bin/rust-analyzer").to_path_buf())
+        .with_env("RUST_LOG".to_string(), "info".to_string());
 
         assert_eq!(config.project_root, project_root);
-        assert_eq!(config.server_path, Path::new("/usr/bin/rust-analyzer"));
+        assert_eq!(
+            config.server_executable_path,
+            Path::new("/usr/bin/rust-analyzer")
+        );
         assert_eq!(config.env.len(), 1);
         assert_eq!(config.env[0], ("RUST_LOG".to_string(), "info".to_string()));
     }

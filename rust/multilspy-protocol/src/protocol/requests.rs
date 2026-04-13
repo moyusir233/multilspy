@@ -19,8 +19,8 @@
 //! | [`CallHierarchyIncomingCallsParams`] | `callHierarchy/incomingCalls` — [CallHierarchyIncomingCallsParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_incomingCalls) |
 //! | [`CallHierarchyOutgoingCallsParams`] | `callHierarchy/outgoingCalls` — [CallHierarchyOutgoingCallsParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_outgoingCalls) |
 
-use serde::{Deserialize, Serialize};
 use super::common::*;
+use serde::{Deserialize, Serialize};
 
 /// Parameters for the `initialize` request.
 ///
@@ -703,7 +703,10 @@ mod tests {
         let serialized = serde_json::to_string(&params).unwrap();
         let deserialized: InitializeParams = serde_json::from_str(&serialized).unwrap();
 
-        assert_eq!(deserialized.client_info.as_ref().unwrap().name, "test-client");
+        assert_eq!(
+            deserialized.client_info.as_ref().unwrap().name,
+            "test-client"
+        );
         assert_eq!(deserialized.locale.as_ref().unwrap(), "en-US");
         assert!(deserialized.initialization_options.is_some());
     }

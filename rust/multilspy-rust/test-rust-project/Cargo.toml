@@ -1,0 +1,12 @@
+[package]
+name="test-rust-project"
+version="0.1.0"
+edition="2024"
+authors=[
+    "moyulao",
+]
+license="MIT"
+
+[workspace]
+
+[dependencies]

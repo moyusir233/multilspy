@@ -1,5 +1,5 @@
-use thiserror::Error;
 use multilspy_protocol::error::ProtocolError;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ServerError {
@@ -23,4 +23,7 @@ pub enum ServerError {
 
     #[error("JSON serialization error: {0}")]
     JsonError(#[from] serde_json::Error),
+
+    #[error("Other internal error: {0}")]
+    Others(#[from] anyhow::Error),
 }
