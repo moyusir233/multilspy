@@ -640,7 +640,9 @@ mod tests {
             PathBuf::from("./ra_initialize_params.json"),
         )
         .with_stderr_log_path(PathBuf::from("./ra_stderr.log"))
-        .with_env("RA_LOG".to_string(), "info".to_string());
+        .with_env("RA_LOG".to_string(), "info".to_string())
+        .with_wait_work_done_progress_create_max_time(Duration::from_secs(5))
+        ;
 
         let server = RustAnalyzerServer::start_server(config).await.unwrap();
 

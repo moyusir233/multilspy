@@ -50,6 +50,8 @@ fn workspace_args() -> Vec<String> {
         test_project_root().display().to_string(),
         "--initialize-params".to_string(),
         initialize_params_path().display().to_string(),
+        "--wait-work-done-progress-create-max-time".to_string(),
+        "5".to_string(),
     ]
 }
 
@@ -197,6 +199,7 @@ fn test_help_flag() {
     let out = run_cli_raw(&["--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("LSP CLI for AI agents"));
+    assert!(out.stdout.contains("--wait-work-done-progress-create-max-time"));
     assert!(out.stdout.contains("definition"));
     assert!(out.stdout.contains("type-definition"));
     assert!(out.stdout.contains("implementation"));

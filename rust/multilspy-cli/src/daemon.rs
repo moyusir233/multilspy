@@ -25,8 +25,13 @@ struct DaemonState {
 pub async fn run_daemon(
     workspace: PathBuf,
     initialize_params_path: PathBuf,
+    wait_work_done_progress_create_max_time_secs: Option<u64>,
 ) -> anyhow::Result<()> {
-    let config = RustAnalyzerConfig::new(workspace.clone(), initialize_params_path);
+    let config = match wait_work_done_progress_create_max_time_secs {
+        Some(secs) => RustAnalyzerConfig::new(workspace.clone(), initialize_params_path)
+            .with_wait_work_done_progress_create_max_time(Duration::from_secs(secs)),
+        None => RustAnalyzerConfig::new(workspace.clone(), initialize_params_path),
+    };
 
     tracing::info!("daemon: initializing LSPClient for {:?}", workspace);
     let client = LSPClient::new(config).await?;

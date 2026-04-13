@@ -40,7 +40,7 @@ impl RustAnalyzerConfig {
             server_executable_path: get_rust_analyzer_path().unwrap_or_default(),
             env: Vec::new(),
             ra_stderr_log_path: None,
-            wait_work_done_progress_create_max_time: Duration::from_secs(300),
+            wait_work_done_progress_create_max_time: Duration::from_secs(30),
         };
 
         if let Ok(current_dir) = std::env::current_dir() {
@@ -67,6 +67,11 @@ impl RustAnalyzerConfig {
 
     pub fn with_stderr_log_path(mut self, path: PathBuf) -> Self {
         self.ra_stderr_log_path = Some(path);
+        self
+    }
+
+    pub fn with_wait_work_done_progress_create_max_time(mut self, duration: Duration) -> Self {
+        self.wait_work_done_progress_create_max_time = duration;
         self
     }
 }

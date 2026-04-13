@@ -31,6 +31,14 @@ struct Cli {
     )]
     initialize_params: Option<PathBuf>,
 
+    #[arg(
+        short = 't',
+        long = "wait-work-done-progress-create-max-time",
+        global = true,
+        help = "Max wait time (seconds) for rust-analyzer to create workDoneProgress"
+    )]
+    wait_work_done_progress_create_max_time_secs: Option<u64>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -151,6 +159,8 @@ enum Command {
         workspace: PathBuf,
         #[arg(long = "initialize-params")]
         initialize_params: PathBuf,
+        #[arg(long = "wait-work-done-progress-create-max-time")]
+        wait_work_done_progress_create_max_time_secs: Option<u64>,
     },
 }
 
@@ -177,8 +187,15 @@ async fn main() -> ExitCode {
         Command::Daemon {
             workspace,
             initialize_params,
+            wait_work_done_progress_create_max_time_secs,
         } => {
-            if let Err(e) = daemon::run_daemon(workspace, initialize_params).await {
+            if let Err(e) = daemon::run_daemon(
+                workspace,
+                initialize_params,
+                wait_work_done_progress_create_max_time_secs,
+            )
+            .await
+            {
                 eprintln!(
                     "{}",
                     serde_json::json!({"error": {"code": -1, "message": e.to_string()}})
@@ -187,7 +204,15 @@ async fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        cmd => run_client_command(cmd, cli.workspace, cli.initialize_params).await,
+        cmd => {
+            run_client_command(
+                cmd,
+                cli.workspace,
+                cli.initialize_params,
+                cli.wait_work_done_progress_create_max_time_secs,
+            )
+            .await
+        }
     }
 }
 
@@ -195,14 +220,21 @@ async fn run_client_command(
     cmd: Command,
     workspace_arg: Option<PathBuf>,
     init_params_arg: Option<PathBuf>,
+    wait_work_done_progress_create_max_time_secs: Option<u64>,
 ) -> ExitCode {
     let workspace = workspace_arg
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let initialize_params = init_params_arg
-        .unwrap_or_else(|| workspace.join("ra_initialize_params.json"));
+    let initialize_params =
+        init_params_arg.unwrap_or_else(|| workspace.join("ra_initialize_params.json"));
 
-    let port = match lifecycle::ensure_daemon(&workspace, &initialize_params).await {
+    let port = match lifecycle::ensure_daemon(
+        &workspace,
+        &initialize_params,
+        wait_work_done_progress_create_max_time_secs,
+    )
+    .await
+    {
         Ok(p) => p,
         Err(e) => {
             output_error(-1, format!("failed to connect to daemon: {}", e));

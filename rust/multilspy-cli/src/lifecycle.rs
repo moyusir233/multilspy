@@ -91,14 +91,23 @@ fn release_lock(file: &File) {
     }
 }
 
-pub async fn ensure_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow::Result<u16> {
+pub async fn ensure_daemon(
+    workspace: &Path,
+    initialize_params_path: &Path,
+    wait_work_done_progress_create_max_time_secs: Option<u64>,
+) -> anyhow::Result<u16> {
     let canonical = workspace
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
 
     let lock = acquire_lock(&canonical)?;
 
-    let result = ensure_daemon_inner(&canonical, initialize_params_path).await;
+    let result = ensure_daemon_inner(
+        &canonical,
+        initialize_params_path,
+        wait_work_done_progress_create_max_time_secs,
+    )
+    .await;
 
     release_lock(&lock);
     drop(lock);
@@ -109,6 +118,7 @@ pub async fn ensure_daemon(workspace: &Path, initialize_params_path: &Path) -> a
 async fn ensure_daemon_inner(
     canonical: &Path,
     initialize_params_path: &Path,
+    wait_work_done_progress_create_max_time_secs: Option<u64>,
 ) -> anyhow::Result<u16> {
     if let Some(info) = read_pidfile(canonical) {
         if is_process_alive(info.pid) && ipc::ping(info.port).await {
@@ -123,10 +133,19 @@ async fn ensure_daemon_inner(
         let _ = remove_pidfile(canonical);
     }
 
-    spawn_daemon(canonical, initialize_params_path).await
+    spawn_daemon(
+        canonical,
+        initialize_params_path,
+        wait_work_done_progress_create_max_time_secs,
+    )
+    .await
 }
 
-async fn spawn_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow::Result<u16> {
+async fn spawn_daemon(
+    workspace: &Path,
+    initialize_params_path: &Path,
+    wait_work_done_progress_create_max_time_secs: Option<u64>,
+) -> anyhow::Result<u16> {
     let exe = std::env::current_exe()?;
 
     let mut cmd = std::process::Command::new(&exe);
@@ -138,6 +157,11 @@ async fn spawn_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+
+    if let Some(secs) = wait_work_done_progress_create_max_time_secs {
+        cmd.arg("--wait-work-done-progress-create-max-time")
+            .arg(secs.to_string());
+    }
 
     #[cfg(unix)]
     unsafe {
@@ -165,5 +189,5 @@ async fn spawn_daemon(workspace: &Path, initialize_params_path: &Path) -> anyhow
         }
     }
 
-    anyhow::bail!("failed to start daemon within 30 seconds")
+    anyhow::bail!("failed to start daemon within 1200 seconds")
 }
