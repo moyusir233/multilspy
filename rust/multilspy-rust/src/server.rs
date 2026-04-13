@@ -107,10 +107,7 @@ fn spawn_lsp_server_process(
 
     cmd.stdout(Stdio::piped()).stdin(Stdio::piped());
 
-    if let Some(path) = &config.ra_stderr_log_path
-        && path.exists()
-        && path.is_file()
-    {
+    if let Some(path) = &config.ra_stderr_log_path {
         cmd.stderr(std::fs::File::create(path)?);
     } else {
         cmd.stderr(Stdio::piped());
