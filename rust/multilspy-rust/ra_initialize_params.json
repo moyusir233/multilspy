@@ -883,7 +883,7 @@
         "notifications": {
             "cargoTomlNotFound": true
         },
-        "numThreads": null,
+        "numThreads": "physical",
         "procMacro": {
             "attributes": {
                 "enable": true
