@@ -1,25 +1,27 @@
 [package]
-name = "multilspy-cli"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+name             ="multilspy-cli"
+version.workspace=true
+edition.workspace=true
+authors.workspace=true
+license.workspace=true
 
 [dependencies]
-tokio.workspace = true
-clap.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-thiserror.workspace = true
-axum.workspace = true
-reqwest.workspace = true
-tracing-subscriber = "0.3"
-multilspy-protocol = { path = "../multilspy-protocol" }
-multilspy-rust = { path = "../multilspy-rust" }
-libc = "0.2"
+tokio.workspace             =true
+clap.workspace              =true
+serde.workspace             =true
+serde_json.workspace        =true
+anyhow.workspace            =true
+tracing.workspace           =true
+thiserror.workspace         =true
+axum.workspace              =true
+reqwest.workspace           =true
+tracing-subscriber.workspace=true
+dashmap.workspace           =true
+libc                        ="0.2"
+
+multilspy-protocol={ path="../multilspy-protocol" }
+multilspy-rust    ={ path="../multilspy-rust" }
 
 [dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.0"
+assert_cmd="2.0"
+predicates="3.0"

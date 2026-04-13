@@ -2,7 +2,7 @@
 
 pub(crate) mod client;
 pub(crate) mod config;
-pub(crate) mod error;
+pub mod error;
 pub(crate) mod logic;
 pub(crate) mod server;
 

@@ -216,7 +216,7 @@
             },
             "definition": {
                 "dynamicRegistration": true,
-                "linkSupport": true
+                "linkSupport": false
             },
             "references": {
                 "dynamicRegistration": true
@@ -314,11 +314,11 @@
             },
             "typeDefinition": {
                 "dynamicRegistration": true,
-                "linkSupport": true
+                "linkSupport": false
             },
             "implementation": {
                 "dynamicRegistration": true,
-                "linkSupport": true
+                "linkSupport": false
             },
             "colorProvider": {
                 "dynamicRegistration": true
@@ -340,7 +340,7 @@
             },
             "declaration": {
                 "dynamicRegistration": true,
-                "linkSupport": true
+                "linkSupport": false
             },
             "selectionRange": {
                 "dynamicRegistration": true

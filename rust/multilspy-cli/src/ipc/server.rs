@@ -1,41 +1,38 @@
 use axum::{
+    Json, Router,
     extract::State,
     routing::{get, post},
-    Json, Router,
 };
-use multilspy_rust::config::RustAnalyzerConfig;
-use multilspy_rust::logic::RecursiveCallHierarchy;
+use dashmap::DashMap;
+use multilspy_rust::{LSPClient, RustAnalyzerConfig};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::position_utils::*;
 use crate::ipc::types::*;
+use crate::position_utils::*;
 
 struct LSPInstance {
-    lsp: Arc<Mutex<RecursiveCallHierarchy>>,
+    lsp: LSPClient,
 }
 
 struct LSPManager {
-    instances: Mutex<HashMap<String, Arc<LSPInstance>>>,
+    instances: DashMap<String, LSPInstance>,
 }
 
 impl LSPManager {
     fn new() -> Self {
         Self {
-            instances: Mutex::new(HashMap::new()),
+            instances: DashMap::new(),
         }
     }
 
     async fn get_or_create_instance(&self, project_path: String) -> Result<(), String> {
         // First check if instance already exists
-        {
-            let instances = self.instances.lock().await;
-            if instances.contains_key(&project_path) {
-                return Ok(());
-            }
+        if self.instances.contains_key(&project_path) {
+            return Ok(());
         }
 
         // Validate project path and create config (not holding lock)
@@ -46,12 +43,19 @@ impl LSPManager {
 
         let config = RustAnalyzerConfig::new(project_root);
         let mut lsp = RecursiveCallHierarchy::new(config);
-        lsp.start().await.map_err(|e| format!("Failed to start LSP: {}", e))?;
+        lsp.start()
+            .await
+            .map_err(|e| format!("Failed to start LSP: {}", e))?;
 
         // Now insert, checking again in case someone else inserted while we were starting LSP
         let mut instances = self.instances.lock().await;
         if !instances.contains_key(&project_path) {
-            instances.insert(project_path, Arc::new(LSPInstance { lsp: Arc::new(Mutex::new(lsp)) }));
+            instances.insert(
+                project_path,
+                Arc::new(LSPInstance {
+                    lsp: Arc::new(Mutex::new(lsp)),
+                }),
+            );
         }
 
         Ok(())
@@ -112,16 +116,19 @@ struct StartResult {
     project_path: String,
 }
 
-async fn start(
-    State(state): State<AppState>,
-    Json(req): Json<StartRequest>,
-) -> Json<ApiResponse> {
+async fn start(State(state): State<AppState>, Json(req): Json<StartRequest>) -> Json<ApiResponse> {
     if req.project_path.is_empty() {
         return Json(ApiResponse::error("project_path is required".to_string()));
     }
 
-    match state.manager.get_or_create_instance(req.project_path.clone()).await {
-        Ok(_) => Json(ApiResponse::ok(StartResult { project_path: req.project_path })),
+    match state
+        .manager
+        .get_or_create_instance(req.project_path.clone())
+        .await
+    {
+        Ok(_) => Json(ApiResponse::ok(StartResult {
+            project_path: req.project_path,
+        })),
         Err(e) => Json(ApiResponse::error(e)),
     }
 }
@@ -146,9 +153,7 @@ async fn shutdown(
     Json(ApiResponse::stopped())
 }
 
-async fn status(
-    State(state): State<AppState>,
-) -> Json<ApiResponse> {
+async fn status(State(state): State<AppState>) -> Json<ApiResponse> {
     let instances = state.manager.instances.lock().await;
     let statuses: Vec<_> = instances.keys().cloned().collect();
     Json(ApiResponse::ok(statuses))
@@ -159,11 +164,15 @@ async fn definition(
     Json(req): Json<PositionRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -172,7 +181,9 @@ async fn definition(
 
     let result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.definition(file_uri, lsp_pos.line, lsp_pos.character).await
+        lsp_guard
+            .definition(file_uri, lsp_pos.line, lsp_pos.character)
+            .await
     };
 
     match result {
@@ -180,7 +191,10 @@ async fn definition(
             let raw_locations = convert_all_locations_to_raw(&locations);
             Json(ApiResponse::ok(raw_locations))
         }
-        Err(e) => Json(ApiResponse::error(format!("Failed to get definition: {}", e))),
+        Err(e) => Json(ApiResponse::error(format!(
+            "Failed to get definition: {}",
+            e
+        ))),
     }
 }
 
@@ -189,11 +203,15 @@ async fn type_definition(
     Json(req): Json<PositionRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -202,7 +220,9 @@ async fn type_definition(
 
     let result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.type_definition(file_uri, lsp_pos.line, lsp_pos.character).await
+        lsp_guard
+            .type_definition(file_uri, lsp_pos.line, lsp_pos.character)
+            .await
     };
 
     match result {
@@ -210,7 +230,10 @@ async fn type_definition(
             let raw_locations = convert_all_locations_to_raw(&locations);
             Json(ApiResponse::ok(raw_locations))
         }
-        Err(e) => Json(ApiResponse::error(format!("Failed to get type definition: {}", e))),
+        Err(e) => Json(ApiResponse::error(format!(
+            "Failed to get type definition: {}",
+            e
+        ))),
     }
 }
 
@@ -219,11 +242,15 @@ async fn implementation(
     Json(req): Json<PositionRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -232,7 +259,9 @@ async fn implementation(
 
     let result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.implementation(file_uri, lsp_pos.line, lsp_pos.character).await
+        lsp_guard
+            .implementation(file_uri, lsp_pos.line, lsp_pos.character)
+            .await
     };
 
     match result {
@@ -240,7 +269,10 @@ async fn implementation(
             let raw_locations = convert_all_locations_to_raw(&locations);
             Json(ApiResponse::ok(raw_locations))
         }
-        Err(e) => Json(ApiResponse::error(format!("Failed to get implementation: {}", e))),
+        Err(e) => Json(ApiResponse::error(format!(
+            "Failed to get implementation: {}",
+            e
+        ))),
     }
 }
 
@@ -249,11 +281,15 @@ async fn references(
     Json(req): Json<ReferencesRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -262,7 +298,9 @@ async fn references(
 
     let result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.references(file_uri, lsp_pos.line, lsp_pos.character, true).await
+        lsp_guard
+            .references(file_uri, lsp_pos.line, lsp_pos.character, true)
+            .await
     };
 
     match result {
@@ -270,7 +308,10 @@ async fn references(
             let raw_locations = convert_all_locations_to_raw(&locations);
             Json(ApiResponse::ok(raw_locations))
         }
-        Err(e) => Json(ApiResponse::error(format!("Failed to get references: {}", e))),
+        Err(e) => Json(ApiResponse::error(format!(
+            "Failed to get references: {}",
+            e
+        ))),
     }
 }
 
@@ -279,11 +320,15 @@ async fn document_symbols(
     Json(req): Json<DocumentSymbolsRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -299,7 +344,10 @@ async fn document_symbols(
             let raw_symbols = convert_document_symbols_to_raw(&symbols);
             Json(ApiResponse::ok(raw_symbols))
         }
-        Err(e) => Json(ApiResponse::error(format!("Failed to get document symbols: {}", e))),
+        Err(e) => Json(ApiResponse::error(format!(
+            "Failed to get document symbols: {}",
+            e
+        ))),
     }
 }
 
@@ -308,11 +356,15 @@ async fn incoming_calls(
     Json(req): Json<PositionRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -321,12 +373,19 @@ async fn incoming_calls(
 
     let items_result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character).await
+        lsp_guard
+            .prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character)
+            .await
     };
 
     let items = match items_result {
         Ok(items) => items,
-        Err(e) => return Json(ApiResponse::error(format!("Failed to prepare call hierarchy: {}", e))),
+        Err(e) => {
+            return Json(ApiResponse::error(format!(
+                "Failed to prepare call hierarchy: {}",
+                e
+            )));
+        }
     };
 
     let mut all_calls = Vec::new();
@@ -337,7 +396,12 @@ async fn incoming_calls(
         };
         match calls_result {
             Ok(calls) => all_calls.extend(calls),
-            Err(e) => return Json(ApiResponse::error(format!("Failed to get incoming calls: {}", e))),
+            Err(e) => {
+                return Json(ApiResponse::error(format!(
+                    "Failed to get incoming calls: {}",
+                    e
+                )));
+            }
         }
     }
 
@@ -350,11 +414,15 @@ async fn outgoing_calls(
     Json(req): Json<PositionRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -363,12 +431,19 @@ async fn outgoing_calls(
 
     let items_result = {
         let mut lsp_guard = lsp.lock().await;
-        lsp_guard.prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character).await
+        lsp_guard
+            .prepare_call_hierarchy(file_uri.clone(), lsp_pos.line, lsp_pos.character)
+            .await
     };
 
     let items = match items_result {
         Ok(items) => items,
-        Err(e) => return Json(ApiResponse::error(format!("Failed to prepare call hierarchy: {}", e))),
+        Err(e) => {
+            return Json(ApiResponse::error(format!(
+                "Failed to prepare call hierarchy: {}",
+                e
+            )));
+        }
     };
 
     let mut all_calls = Vec::new();
@@ -379,7 +454,12 @@ async fn outgoing_calls(
         };
         match calls_result {
             Ok(calls) => all_calls.extend(calls),
-            Err(e) => return Json(ApiResponse::error(format!("Failed to get outgoing calls: {}", e))),
+            Err(e) => {
+                return Json(ApiResponse::error(format!(
+                    "Failed to get outgoing calls: {}",
+                    e
+                )));
+            }
         }
     }
 
@@ -392,11 +472,15 @@ async fn incoming_calls_recursive(
     Json(req): Json<RecursiveRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -406,7 +490,9 @@ async fn incoming_calls_recursive(
     let result = {
         let mut lsp_guard = lsp.lock().await;
         lsp_guard.clear_visited();
-        lsp_guard.incoming_calls_recursive(file_uri, lsp_pos.line, lsp_pos.character, req.max_depth).await
+        lsp_guard
+            .incoming_calls_recursive(file_uri, lsp_pos.line, lsp_pos.character, req.max_depth)
+            .await
     };
 
     match result {
@@ -420,22 +506,32 @@ async fn incoming_calls_recursive(
                 let mut incoming_refs = Vec::new();
                 for call in calls {
                     let from_key = get_call_hierarchy_key(&call.from);
-                    let from_ranges = call.from_ranges.iter().map(convert_lsp_range_to_raw).collect();
+                    let from_ranges = call
+                        .from_ranges
+                        .iter()
+                        .map(convert_lsp_range_to_raw)
+                        .collect();
                     incoming_refs.push(RecursiveIncomingCallRef {
                         key: from_key,
                         from_ranges,
                     });
                 }
 
-                result_map.insert(key, RecursiveIncomingCallEntry {
-                    info,
-                    incoming_calls: incoming_refs,
-                });
+                result_map.insert(
+                    key,
+                    RecursiveIncomingCallEntry {
+                        info,
+                        incoming_calls: incoming_refs,
+                    },
+                );
             }
 
             Json(ApiResponse::ok(result_map))
         }
-        Err(e) => Json(ApiResponse::error(format!("Failed to get recursive incoming calls: {}", e))),
+        Err(e) => Json(ApiResponse::error(format!(
+            "Failed to get recursive incoming calls: {}",
+            e
+        ))),
     }
 }
 
@@ -444,11 +540,15 @@ async fn outgoing_calls_recursive(
     Json(req): Json<RecursiveRequest>,
 ) -> Json<ApiResponse> {
     if req.project_path.is_empty() || req.file_path.is_empty() {
-        return Json(ApiResponse::error("project_path and file_path are required".to_string()));
+        return Json(ApiResponse::error(
+            "project_path and file_path are required".to_string(),
+        ));
     }
 
     let Some(instance) = state.manager.get_instance(&req.project_path).await else {
-        return Json(ApiResponse::error("Instance not found for project path".to_string()));
+        return Json(ApiResponse::error(
+            "Instance not found for project path".to_string(),
+        ));
     };
 
     let lsp = instance.lsp.clone();
@@ -458,7 +558,9 @@ async fn outgoing_calls_recursive(
     let result = {
         let mut lsp_guard = lsp.lock().await;
         lsp_guard.clear_visited();
-        lsp_guard.outgoing_calls_recursive(file_uri, lsp_pos.line, lsp_pos.character, req.max_depth).await
+        lsp_guard
+            .outgoing_calls_recursive(file_uri, lsp_pos.line, lsp_pos.character, req.max_depth)
+            .await
     };
 
     match result {
@@ -472,21 +574,31 @@ async fn outgoing_calls_recursive(
                 let mut outgoing_refs = Vec::new();
                 for call in calls {
                     let to_key = get_call_hierarchy_key(&call.to);
-                    let from_ranges = call.from_ranges.iter().map(convert_lsp_range_to_raw).collect();
+                    let from_ranges = call
+                        .from_ranges
+                        .iter()
+                        .map(convert_lsp_range_to_raw)
+                        .collect();
                     outgoing_refs.push(RecursiveOutgoingCallRef {
                         key: to_key,
                         from_ranges,
                     });
                 }
 
-                result_map.insert(key, RecursiveOutgoingCallEntry {
-                    info,
-                    outgoing_calls: outgoing_refs,
-                });
+                result_map.insert(
+                    key,
+                    RecursiveOutgoingCallEntry {
+                        info,
+                        outgoing_calls: outgoing_refs,
+                    },
+                );
             }
 
             Json(ApiResponse::ok(result_map))
         }
-        Err(e) => Json(ApiResponse::error(format!("Failed to get recursive outgoing calls: {}", e))),
+        Err(e) => Json(ApiResponse::error(format!(
+            "Failed to get recursive outgoing calls: {}",
+            e
+        ))),
     }
 }

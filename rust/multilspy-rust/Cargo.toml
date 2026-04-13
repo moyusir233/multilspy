@@ -15,8 +15,10 @@ tracing.workspace   =true
 fluent-uri.workspace=true
 
 multilspy-protocol.workspace=true
-dashmap                     ="6.1.0"
-futures-lite                ="2.6.1"
+dashmap.workspace           =true
+futures-lite.workspace      =true
 
 [dev-dependencies]
 tracing-subscriber.workspace=true
+tokio.workspace             =true
+multilspy-protocol.workspace=true
