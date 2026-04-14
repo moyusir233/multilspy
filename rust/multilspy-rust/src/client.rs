@@ -189,6 +189,12 @@ impl LSPClient {
         .await
     }
 
+    async fn server_capabilities(&self) -> anyhow::Result<ServerCapabilities> {
+        self.server.server_capabilities().await.ok_or_else(|| {
+            anyhow::anyhow!("server capabilities are unavailable before initialization")
+        })
+    }
+
     pub async fn definition(
         &self,
         uri: String,
@@ -267,6 +273,63 @@ impl LSPClient {
         };
         self.send_text_document_request(&uri, "textDocument/implementation", params)
             .await
+    }
+
+    pub async fn workspace_symbols(
+        &self,
+        query: String,
+    ) -> anyhow::Result<WorkspaceSymbolResponse> {
+        let query = query.trim();
+        if query.is_empty() {
+            anyhow::bail!("workspace/symbol query must not be empty or whitespace-only");
+        }
+
+        let capabilities = self.server_capabilities().await?;
+        if !capabilities.supports_workspace_symbol() {
+            anyhow::bail!(
+                "server does not advertise support for workspace/symbol in initialize capabilities"
+            );
+        }
+
+        let params = WorkspaceSymbolParams {
+            query: query.to_string(),
+        };
+        let result = self
+            .server
+            .send_request("workspace/symbol".to_string(), Some(params))
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
+
+        serde_json::from_value(result).map_err(|e| {
+            anyhow::anyhow!("failed to deserialize for workspace symbols resp, err: {e}")
+        })
+    }
+
+    pub async fn workspace_symbol_resolve(
+        &self,
+        symbol: WorkspaceSymbol,
+    ) -> anyhow::Result<WorkspaceSymbolResolveResponse> {
+        let capabilities = self.server_capabilities().await?;
+        if !capabilities.supports_workspace_symbol() {
+            anyhow::bail!(
+                "server does not advertise support for workspace/symbol in initialize capabilities"
+            );
+        }
+        if !capabilities.supports_workspace_symbol_resolve() {
+            anyhow::bail!(
+                "server does not advertise support for workspaceSymbol/resolve in initialize capabilities"
+            );
+        }
+
+        let result = self
+            .server
+            .send_request("workspaceSymbol/resolve".to_string(), Some(symbol))
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
+
+        serde_json::from_value(result).map_err(|e| {
+            anyhow::anyhow!("failed to deserialize for workspace symbol resolve resp, err: {e}")
+        })
     }
 
     pub async fn prepare_call_hierarchy(

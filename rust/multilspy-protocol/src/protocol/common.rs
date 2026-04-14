@@ -17,6 +17,10 @@
 //! | [`SymbolKind`] | [SymbolKind](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolKind) |
 //! | [`SymbolTag`] | [SymbolTag](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolTag) |
 //! | [`DocumentSymbol`] | [DocumentSymbol](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#documentSymbol) |
+//! | [`SymbolInformation`] | [SymbolInformation](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolInformation) |
+//! | [`WorkspaceSymbolLocation`] | [WorkspaceSymbol.location](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceSymbol) |
+//! | [`WorkspaceSymbol`] | [WorkspaceSymbol](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceSymbol) |
+//! | [`WorkspaceSymbolItem`] | `SymbolInformation | WorkspaceSymbol` |
 //! | [`CallHierarchyItem`] | [CallHierarchyItem](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchyItem) |
 //! | [`CallHierarchyIncomingCall`] | [CallHierarchyIncomingCall](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_incomingCalls) |
 //! | [`CallHierarchyOutgoingCall`] | [CallHierarchyOutgoingCall](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_outgoingCalls) |
@@ -524,6 +528,167 @@ pub struct DocumentSymbol {
     /// Children of this symbol, e.g. properties of a class.
     #[serde(default)]
     pub children: Option<Vec<DocumentSymbol>>,
+}
+
+/// Represents programming constructs like variables, classes, interfaces etc. that can be
+/// returned from workspace-wide symbol searches.
+///
+/// Unlike [`DocumentSymbol`], this is a flat symbol representation that includes a concrete
+/// [`Location`] within the workspace.
+///
+/// # Wire Format
+///
+/// ```json
+/// {
+///   "name": "helper",
+///   "kind": 12,
+///   "tags": [1],
+///   "deprecated": false,
+///   "location": {
+///     "uri": "file:///path/to/main.rs",
+///     "range": {
+///       "start": { "line": 34, "character": 0 },
+///       "end": { "line": 37, "character": 1 }
+///     }
+///   },
+///   "containerName": "main"
+/// }
+/// ```
+///
+/// # LSP Specification
+///
+/// See [SymbolInformation](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolInformation).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolInformation {
+    /// The name of this symbol.
+    pub name: String,
+    /// The kind of this symbol.
+    pub kind: SymbolKind,
+    /// Tags for this symbol.
+    #[serde(default)]
+    pub tags: Option<Vec<SymbolTag>>,
+    /// Indicates if this symbol is deprecated.
+    ///
+    /// **Deprecated:** Use `tags` with [`SymbolTag::Deprecated`] instead.
+    #[serde(default)]
+    pub deprecated: Option<bool>,
+    /// The location of this symbol.
+    pub location: Location,
+    /// The name of the symbol containing this symbol.
+    #[serde(default)]
+    pub container_name: Option<String>,
+}
+
+/// A lightweight location placeholder for a [`WorkspaceSymbol`] whose range has not yet been
+/// resolved.
+///
+/// # Wire Format
+///
+/// ```json
+/// { "uri": "file:///path/to/main.rs" }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceSymbolUriLocation {
+    /// The URI of the workspace symbol.
+    pub uri: String,
+}
+
+/// The location field used by [`WorkspaceSymbol`].
+///
+/// Per LSP 3.17, this can either be a full [`Location`] or a lightweight object that contains
+/// only a `uri` until `workspaceSymbol/resolve` fills in additional data such as `range`.
+///
+/// # LSP Specification
+///
+/// See [WorkspaceSymbol.location](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceSymbol).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum WorkspaceSymbolLocation {
+    /// A fully resolved symbol location.
+    Location(Location),
+    /// A partially resolved location that includes only the symbol URI.
+    UriOnly(WorkspaceSymbolUriLocation),
+}
+
+/// Represents a workspace symbol as defined in LSP 3.17.
+///
+/// This type is designed for `workspace/symbol` and `workspaceSymbol/resolve`. A server may
+/// initially omit range information from `location` and return only a URI, then provide the
+/// full location once the symbol is resolved.
+///
+/// # Wire Format
+///
+/// ```json
+/// {
+///   "name": "helper",
+///   "kind": 12,
+///   "location": {
+///     "uri": "file:///path/to/main.rs"
+///   },
+///   "containerName": "main",
+///   "data": { "id": 1 }
+/// }
+/// ```
+///
+/// # LSP Specification
+///
+/// See [WorkspaceSymbol](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceSymbol).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSymbol {
+    /// The name of this symbol.
+    pub name: String,
+    /// The kind of this symbol.
+    pub kind: SymbolKind,
+    /// Tags for this symbol.
+    #[serde(default)]
+    pub tags: Option<Vec<SymbolTag>>,
+    /// The name of the symbol containing this symbol.
+    #[serde(default)]
+    pub container_name: Option<String>,
+    /// The location of this symbol.
+    pub location: WorkspaceSymbolLocation,
+    /// A data entry field preserved between `workspace/symbol` and `workspaceSymbol/resolve`.
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+}
+
+impl WorkspaceSymbol {
+    /// Converts a legacy `SymbolInformation` value into the newer `WorkspaceSymbol` shape.
+    pub fn from_symbol_information(symbol: SymbolInformation) -> Self {
+        Self {
+            name: symbol.name,
+            kind: symbol.kind,
+            tags: symbol.tags,
+            container_name: symbol.container_name,
+            location: WorkspaceSymbolLocation::Location(symbol.location),
+            data: None,
+        }
+    }
+}
+
+/// A workspace symbol search result item.
+///
+/// `workspace/symbol` can return either legacy [`SymbolInformation`] items or modern
+/// [`WorkspaceSymbol`] items. This enum models both forms without losing wire compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum WorkspaceSymbolItem {
+    SymbolInformation(SymbolInformation),
+    WorkspaceSymbol(WorkspaceSymbol),
+}
+
+impl WorkspaceSymbolItem {
+    /// Converts any supported workspace symbol result item into a `WorkspaceSymbol`.
+    pub fn into_workspace_symbol(self) -> WorkspaceSymbol {
+        match self {
+            WorkspaceSymbolItem::SymbolInformation(symbol) => {
+                WorkspaceSymbol::from_symbol_information(symbol)
+            }
+            WorkspaceSymbolItem::WorkspaceSymbol(symbol) => symbol,
+        }
+    }
 }
 
 /// Symbol tags are extra annotations that tweak the rendering of a symbol.

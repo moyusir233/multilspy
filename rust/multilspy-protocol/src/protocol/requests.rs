@@ -15,6 +15,7 @@
 //! | [`ReferencesParams`] | `textDocument/references` — [ReferenceParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#referenceParams) |
 //! | [`DocumentSymbolParams`] | `textDocument/documentSymbol` — [DocumentSymbolParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#documentSymbolParams) |
 //! | [`ImplementationParams`] | `textDocument/implementation` — [ImplementationParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#implementationParams) |
+//! | [`WorkspaceSymbolParams`] | `workspace/symbol` — [WorkspaceSymbolParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_symbol) |
 //! | [`CallHierarchyPrepareParams`] | `textDocument/prepareCallHierarchy` — [CallHierarchyPrepareParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_prepareCallHierarchy) |
 //! | [`CallHierarchyIncomingCallsParams`] | `callHierarchy/incomingCalls` — [CallHierarchyIncomingCallsParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_incomingCalls) |
 //! | [`CallHierarchyOutgoingCallsParams`] | `callHierarchy/outgoingCalls` — [CallHierarchyOutgoingCallsParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#callHierarchy_outgoingCalls) |
@@ -187,6 +188,7 @@ pub struct ClientCapabilities {
 /// | Field | Type | Required | Description |
 /// |-------|------|----------|-------------|
 /// | `workspace_folders` | `Option<bool>` | No | The client supports workspace folders. Wire name: `workspaceFolders`. |
+/// | `other` | `Map<String, Value>` | — | Catch-all for unrecognized workspace capability fields. |
 ///
 /// # LSP Specification
 ///
@@ -200,6 +202,10 @@ pub struct WorkspaceClientCapabilities {
     /// The client has support for workspace folders.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_folders: Option<bool>,
+
+    /// Catch-all for additional workspace capabilities not explicitly modeled.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Text document-specific client capabilities.
@@ -216,6 +222,7 @@ pub struct WorkspaceClientCapabilities {
 /// | `document_symbol` | `Option<DocumentSymbolClientCapabilities>` | No | Capabilities for `textDocument/documentSymbol`. Wire name: `documentSymbol`. |
 /// | `implementation` | `Option<ImplementationClientCapabilities>` | No | Capabilities for `textDocument/implementation`. |
 /// | `call_hierarchy` | `Option<CallHierarchyClientCapabilities>` | No | Capabilities for `textDocument/prepareCallHierarchy`. Wire name: `callHierarchy`. |
+/// | `other` | `Map<String, Value>` | — | Catch-all for unrecognized text document capability fields. |
 ///
 /// # LSP Specification
 ///
@@ -251,6 +258,10 @@ pub struct TextDocumentClientCapabilities {
     /// @since 3.16.0
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_hierarchy: Option<CallHierarchyClientCapabilities>,
+
+    /// Catch-all for additional text document capabilities not explicitly modeled.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Client capabilities for the `textDocument/definition` request.
@@ -554,6 +565,33 @@ pub struct DocumentSymbolParams {
 pub struct ImplementationParams {
     #[serde(flatten)]
     pub text_document_position: TextDocumentPositionParams,
+}
+
+/// Parameters for the `workspace/symbol` request.
+///
+/// The workspace symbol request is sent from the client to the server to list project-wide
+/// symbols matching a query string.
+///
+/// # Wire Format
+///
+/// ```json
+/// { "query": "helper" }
+/// ```
+///
+/// # Fields
+///
+/// | Field | Type | Required | Description |
+/// |-------|------|----------|-------------|
+/// | `query` | `String` | Yes | A non-empty query string used to search workspace symbols. |
+///
+/// # LSP Specification
+///
+/// See [WorkspaceSymbolParams](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_symbol).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSymbolParams {
+    /// A query string used to search workspace symbols.
+    pub query: String,
 }
 
 /// Parameters for the `textDocument/prepareCallHierarchy` request.

@@ -15,6 +15,7 @@
 //! | [`ReferencesProviderCapability`] | [referencesProvider](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities) |
 //! | [`DocumentSymbolProviderCapability`] | [documentSymbolProvider](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities) |
 //! | [`ImplementationProviderCapability`] | [implementationProvider](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities) |
+//! | [`WorkspaceSymbolProviderCapability`] | [workspaceSymbolProvider](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_symbol) |
 //! | [`CallHierarchyProviderCapability`] | [callHierarchyProvider](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities) |
 //!
 //! # Response Type Aliases
@@ -26,6 +27,8 @@
 //! | [`ReferencesResponse`] | `Vec<Location>` | `textDocument/references` |
 //! | [`DocumentSymbolResponse`] | `Vec<DocumentSymbol>` | `textDocument/documentSymbol` |
 //! | [`ImplementationResponse`] | `Vec<Location>` | `textDocument/implementation` |
+//! | [`WorkspaceSymbolResponse`] | `Vec<WorkspaceSymbolItem>` | `workspace/symbol` |
+//! | [`WorkspaceSymbolResolveResponse`] | `Option<WorkspaceSymbol>` | `workspaceSymbol/resolve` |
 //! | [`CallHierarchyPrepareResponse`] | `Vec<CallHierarchyItem>` | `textDocument/prepareCallHierarchy` |
 //! | [`CallHierarchyIncomingCallsResponse`] | `Vec<CallHierarchyIncomingCall>` | `callHierarchy/incomingCalls` |
 //! | [`CallHierarchyOutgoingCallsResponse`] | `Vec<CallHierarchyOutgoingCall>` | `callHierarchy/outgoingCalls` |
@@ -91,6 +94,7 @@ pub struct InitializeResult {
 /// | `references_provider` | `Option<ReferencesProviderCapability>` | No | The server provides find references support. Wire name: `referencesProvider`. |
 /// | `document_symbol_provider` | `Option<DocumentSymbolProviderCapability>` | No | The server provides document symbol support. Wire name: `documentSymbolProvider`. |
 /// | `implementation_provider` | `Option<ImplementationProviderCapability>` | No | The server provides go to implementation support. Wire name: `implementationProvider`. |
+/// | `workspace_symbol_provider` | `Option<WorkspaceSymbolProviderCapability>` | No | The server provides workspace symbol support. Wire name: `workspaceSymbolProvider`. |
 /// | `call_hierarchy_provider` | `Option<CallHierarchyProviderCapability>` | No | The server provides call hierarchy support. Wire name: `callHierarchyProvider`. @since 3.16.0. |
 /// | `other` | `Map<String, Value>` | — | Catch-all for additional capability fields not explicitly modeled. |
 ///
@@ -124,6 +128,10 @@ pub struct ServerCapabilities {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub implementation_provider: Option<ImplementationProviderCapability>,
 
+    /// The server provides workspace symbol support.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_symbol_provider: Option<WorkspaceSymbolProviderCapability>,
+
     /// The server provides call hierarchy support.
     ///
     /// @since 3.16.0
@@ -133,6 +141,20 @@ pub struct ServerCapabilities {
     /// Catch-all for additional capability fields not explicitly modeled.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
+}
+
+impl ServerCapabilities {
+    pub fn supports_workspace_symbol(&self) -> bool {
+        self.workspace_symbol_provider
+            .as_ref()
+            .is_some_and(WorkspaceSymbolProviderCapability::is_supported)
+    }
+
+    pub fn supports_workspace_symbol_resolve(&self) -> bool {
+        self.workspace_symbol_provider
+            .as_ref()
+            .is_some_and(WorkspaceSymbolProviderCapability::resolve_provider)
+    }
 }
 
 /// Definition provider capability.
@@ -329,6 +351,63 @@ pub struct ImplementationOptions {
     pub work_done_progress: Option<bool>,
 }
 
+/// Workspace symbol provider capability.
+///
+/// The `workspaceSymbolProvider` field can be a boolean, `WorkspaceSymbolOptions`, or
+/// `WorkspaceSymbolRegistrationOptions`. This implementation supports the boolean and options
+/// variants used by the CLI and client.
+///
+/// # LSP Specification
+///
+/// See [ServerCapabilities.workspaceSymbolProvider](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_symbol).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum WorkspaceSymbolProviderCapability {
+    Simple(bool),
+    Options(WorkspaceSymbolOptions),
+}
+
+impl WorkspaceSymbolProviderCapability {
+    pub fn is_supported(&self) -> bool {
+        match self {
+            WorkspaceSymbolProviderCapability::Simple(supported) => *supported,
+            WorkspaceSymbolProviderCapability::Options(_) => true,
+        }
+    }
+
+    pub fn resolve_provider(&self) -> bool {
+        match self {
+            WorkspaceSymbolProviderCapability::Simple(_) => false,
+            WorkspaceSymbolProviderCapability::Options(options) => {
+                options.resolve_provider.unwrap_or(false)
+            }
+        }
+    }
+}
+
+/// Options for the workspace symbol provider.
+///
+/// Extends `WorkDoneProgressOptions`.
+///
+/// # Fields
+///
+/// | Field | Type | Required | Description |
+/// |-------|------|----------|-------------|
+/// | `work_done_progress` | `Option<bool>` | No | Whether work done progress is supported. Wire name: `workDoneProgress`. |
+/// | `resolve_provider` | `Option<bool>` | No | Whether the server supports `workspaceSymbol/resolve`. Wire name: `resolveProvider`. |
+///
+/// # LSP Specification
+///
+/// See [WorkspaceSymbolOptions](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceSymbolOptions).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSymbolOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_done_progress: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolve_provider: Option<bool>,
+}
+
 /// Call hierarchy provider capability.
 ///
 /// The `callHierarchyProvider` field can be a boolean, `CallHierarchyOptions`,
@@ -441,6 +520,22 @@ pub type DocumentSymbolResponse = Vec<DocumentSymbol>;
 ///
 /// See [textDocument/implementation](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_implementation).
 pub type ImplementationResponse = Vec<Location>;
+
+/// Response type for `workspace/symbol`.
+///
+/// The result is `SymbolInformation[] | WorkspaceSymbol[] | null` per the spec. This
+/// implementation preserves both item variants using [`WorkspaceSymbolItem`]. An empty vector
+/// represents `null`.
+///
+/// See [workspace/symbol](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_symbol).
+pub type WorkspaceSymbolResponse = Vec<WorkspaceSymbolItem>;
+
+/// Response type for `workspaceSymbol/resolve`.
+///
+/// The result is `WorkspaceSymbol | null` per the spec.
+///
+/// See [workspaceSymbol/resolve](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_symbolResolve).
+pub type WorkspaceSymbolResolveResponse = Option<WorkspaceSymbol>;
 
 /// Response type for `textDocument/prepareCallHierarchy`.
 ///

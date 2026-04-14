@@ -1,4 +1,7 @@
 use multilspy_rust::{LSPClient, RustAnalyzerConfig};
+use multilspy_protocol::protocol::common::{
+    WorkspaceSymbol, WorkspaceSymbolItem, WorkspaceSymbolLocation,
+};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -450,6 +453,119 @@ async fn test_implementation_of_struct() {
 
     let lines: Vec<u32> = result.iter().map(|loc| loc.range.start.line).collect();
     assert!(lines.contains(&8), "should contain impl block at line 8");
+
+    client.shutdown().await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// LSPClient::workspace_symbols / workspace_symbol_resolve
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_workspace_symbols_query() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client.workspace_symbols("helper".to_string()).await.unwrap();
+    assert!(
+        !result.is_empty(),
+        "workspace_symbols should return at least one matching symbol"
+    );
+
+    let helper = result
+        .iter()
+        .find(|item| match item {
+            WorkspaceSymbolItem::SymbolInformation(symbol) => symbol.name == "helper",
+            WorkspaceSymbolItem::WorkspaceSymbol(symbol) => symbol.name == "helper",
+        })
+        .expect("should contain a symbol named helper");
+
+    match helper {
+        WorkspaceSymbolItem::SymbolInformation(symbol) => {
+            assert!(symbol.location.uri.ends_with("main.rs"));
+        }
+        WorkspaceSymbolItem::WorkspaceSymbol(symbol) => match &symbol.location {
+            WorkspaceSymbolLocation::Location(location) => {
+                assert!(location.uri.ends_with("main.rs"));
+            }
+            WorkspaceSymbolLocation::UriOnly(location) => {
+                assert!(location.uri.ends_with("main.rs"));
+            }
+        },
+    }
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_workspace_symbols_rejects_blank_query() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let error = client
+        .workspace_symbols("   ".to_string())
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("must not be empty or whitespace-only")
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_workspace_symbol_resolve() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let symbol = client
+        .workspace_symbols("helper".to_string())
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|item| match item {
+            WorkspaceSymbolItem::SymbolInformation(symbol) if symbol.name == "helper" => {
+                Some(WorkspaceSymbol::from_symbol_information(symbol))
+            }
+            WorkspaceSymbolItem::WorkspaceSymbol(symbol) if symbol.name == "helper" => {
+                Some(symbol)
+            }
+            _ => None,
+        })
+        .expect("should return a symbol named helper");
+
+    match client.workspace_symbol_resolve(symbol).await {
+        Ok(Some(resolved)) => {
+            assert_eq!(resolved.name, "helper");
+            match resolved.location {
+                WorkspaceSymbolLocation::Location(location) => {
+                    assert!(location.uri.ends_with("main.rs"));
+                    assert_eq!(location.range.start.line, 34);
+                }
+                WorkspaceSymbolLocation::UriOnly(location) => {
+                    panic!("expected resolved location range, got URI only: {}", location.uri);
+                }
+            }
+        }
+        Ok(None) => panic!("resolve returned null for helper"),
+        Err(error) => {
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not advertise support for workspaceSymbol/resolve"),
+                "unexpected resolve error: {}",
+                error
+            );
+        }
+    }
 
     client.shutdown().await.unwrap();
 }

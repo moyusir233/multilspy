@@ -1,3 +1,4 @@
+use multilspy_protocol::protocol::common::WorkspaceSymbol;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +68,17 @@ pub struct RecursiveCallsIpcParams {
     pub line: u32,
     pub character: u32,
     pub max_depth: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceSymbolsIpcParams {
+    pub query: String,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceSymbolResolveIpcParams {
+    pub symbol: WorkspaceSymbol,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

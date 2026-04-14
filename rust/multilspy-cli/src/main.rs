@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand};
 use ipc::{IpcRequest, IpcResponse};
+use multilspy_protocol::protocol::common::{WorkspaceSymbol, WorkspaceSymbolItem};
 use multilspy_protocol::protocol::requests::InitializeParams;
 use reqwest::Url;
 
@@ -105,6 +106,37 @@ JSON Output:
   - Error schema: `{ "error": { "code": number, "message": string } }`
   - Example:
     `{ "result": [{ "name": "Greeter", "kind": 11, "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 2, "character": 1 } }, "selectionRange": { "start": { "line": 0, "character": 6 }, "end": { "line": 0, "character": 13 } }, "children": [] }] }`
+"#;
+
+const WORKSPACE_SYMBOLS_HELP: &str = r#"Input:
+  - `--query <QUERY>` must not be empty or whitespace-only.
+  - `--limit <N>` is optional and truncates large result sets after the server response.
+
+Initialize Params:
+  - `RA_LSP_INIT_PARAMS_PATH` provides a base initialize params JSON file.
+  - `--initialize-params` overrides matching fields from that JSON file.
+
+JSON Output:
+  - Success schema: `{ "result": WorkspaceSymbol[] | SymbolInformation[] }`
+  - Empty matches return `{ "result": [] }`
+  - Error schema: `{ "error": { "code": number, "message": string } }`
+  - Example:
+    `{ "result": [{ "name": "helper", "kind": 12, "location": { "uri": "file:///workspace/src/main.rs" }, "containerName": "main", "data": { "id": 1 } }] }`
+"#;
+
+const WORKSPACE_SYMBOL_RESOLVE_HELP: &str = r#"Input:
+  - Use exactly one of `--symbol-json <JSON>` or `--symbol-file <PATH>`.
+  - The JSON input must be a single `WorkspaceSymbol` or `SymbolInformation` object.
+
+Initialize Params:
+  - `RA_LSP_INIT_PARAMS_PATH` provides a base initialize params JSON file.
+  - `--initialize-params` overrides matching fields from that JSON file.
+
+JSON Output:
+  - Success schema: `{ "result": WorkspaceSymbol | null }`
+  - Error schema: `{ "error": { "code": number, "message": string } }`
+  - Example:
+    `{ "result": { "name": "helper", "kind": 12, "location": { "uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 34, "character": 0 }, "end": { "line": 37, "character": 1 } } }, "containerName": "main", "data": { "id": 1 } } }`
 "#;
 
 const INCOMING_CALLS_HELP: &str = r#"Input:
@@ -233,6 +265,51 @@ impl FileUriArgs {
     }
 }
 
+#[derive(Debug, Clone, Args)]
+struct WorkspaceSymbolInputArgs {
+    #[arg(
+        long,
+        conflicts_with = "symbol_file",
+        required_unless_present = "symbol_file",
+        value_name = "JSON",
+        help = "WorkspaceSymbol or SymbolInformation JSON object"
+    )]
+    symbol_json: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with = "symbol_json",
+        required_unless_present = "symbol_json",
+        value_name = "PATH",
+        help = "Path to a JSON file containing a WorkspaceSymbol or SymbolInformation object"
+    )]
+    symbol_file: Option<PathBuf>,
+}
+
+impl WorkspaceSymbolInputArgs {
+    fn resolve_symbol(&self) -> anyhow::Result<WorkspaceSymbol> {
+        match (&self.symbol_json, &self.symbol_file) {
+            (Some(raw), None) => parse_workspace_symbol(raw, "--symbol-json"),
+            (None, Some(path)) => {
+                let content = fs::read_to_string(path).map_err(|error| {
+                    anyhow::anyhow!(
+                        "failed to read workspace symbol JSON from '{}': {}",
+                        path.display(),
+                        error
+                    )
+                })?;
+                parse_workspace_symbol(&content, &format!("--symbol-file '{}'", path.display()))
+            }
+            (Some(_), Some(_)) => anyhow::bail!(
+                "cannot use --symbol-json together with --symbol-file; pass only one symbol input"
+            ),
+            (None, None) => {
+                anyhow::bail!("one of --symbol-json or --symbol-file must be provided")
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ResolvedInitializeParams {
     path: PathBuf,
@@ -350,6 +427,30 @@ enum Command {
     DocumentSymbols {
         #[command(flatten)]
         file: FileUriArgs,
+    },
+
+    #[command(
+        about = "Search workspace symbols by query",
+        after_help = WORKSPACE_SYMBOLS_HELP
+    )]
+    WorkspaceSymbols {
+        #[arg(long, value_name = "QUERY", help = "Workspace symbol query string")]
+        query: String,
+        #[arg(
+            long,
+            value_name = "N",
+            help = "Optional maximum number of symbols to return"
+        )]
+        limit: Option<usize>,
+    },
+
+    #[command(
+        about = "Resolve additional fields for a workspace symbol",
+        after_help = WORKSPACE_SYMBOL_RESOLVE_HELP
+    )]
+    WorkspaceSymbolResolve {
+        #[command(flatten)]
+        symbol: WorkspaceSymbolInputArgs,
     },
 
     #[command(
@@ -606,6 +707,30 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
             })?,
         ),
 
+        Command::WorkspaceSymbols { query, limit } => {
+            let query = query.trim();
+            if query.is_empty() {
+                anyhow::bail!("--query must not be empty or whitespace-only");
+            }
+            if matches!(limit, Some(0)) {
+                anyhow::bail!("--limit must be greater than zero");
+            }
+            (
+                "workspace-symbols",
+                serde_json::to_value(ipc::WorkspaceSymbolsIpcParams {
+                    query: query.to_string(),
+                    limit: *limit,
+                })?,
+            )
+        }
+
+        Command::WorkspaceSymbolResolve { symbol } => (
+            "workspace-symbol-resolve",
+            serde_json::to_value(ipc::WorkspaceSymbolResolveIpcParams {
+                symbol: symbol.resolve_symbol()?,
+            })?,
+        ),
+
         Command::IncomingCalls {
             file,
             line,
@@ -673,6 +798,22 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
         method: method.to_string(),
         params,
     })
+}
+
+fn parse_workspace_symbol(raw: &str, source: &str) -> anyhow::Result<WorkspaceSymbol> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("workspace symbol input from {} must not be empty", source);
+    }
+
+    let item: WorkspaceSymbolItem = serde_json::from_str(trimmed).map_err(|error| {
+        anyhow::anyhow!(
+            "failed to parse workspace symbol from {}: expected a WorkspaceSymbol or SymbolInformation JSON object: {}",
+            source,
+            error
+        )
+    })?;
+    Ok(item.into_workspace_symbol())
 }
 
 fn resolve_relative_path_to_file_uri(input_path: &Path) -> anyhow::Result<String> {
@@ -1070,5 +1211,48 @@ mod tests {
 
         std::env::set_current_dir(original_cwd).unwrap();
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn parse_workspace_symbol_accepts_symbol_information() {
+        let symbol = parse_workspace_symbol(
+            r#"{
+                "name": "helper",
+                "kind": 12,
+                "location": {
+                    "uri": "file:///workspace/src/main.rs",
+                    "range": {
+                        "start": { "line": 34, "character": 0 },
+                        "end": { "line": 37, "character": 1 }
+                    }
+                },
+                "containerName": "main"
+            }"#,
+            "test",
+        )
+        .unwrap();
+
+        assert_eq!(symbol.name, "helper");
+        match symbol.location {
+            multilspy_protocol::protocol::common::WorkspaceSymbolLocation::Location(location) => {
+                assert_eq!(location.range.start.line, 34);
+            }
+            other => panic!("expected full location, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn build_request_workspace_symbols_rejects_blank_query() {
+        let command = Command::WorkspaceSymbols {
+            query: "   ".to_string(),
+            limit: Some(1),
+        };
+
+        let error = build_request(&command).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("must not be empty or whitespace-only")
+        );
     }
 }

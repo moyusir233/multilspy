@@ -207,6 +207,34 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
             }
         }
 
+        "workspace-symbols" => {
+            let params: WorkspaceSymbolsIpcParams = match serde_json::from_value(req.params) {
+                Ok(p) => p,
+                Err(e) => return IpcResponse::error(ERR_INVALID_PARAMS, e.to_string()),
+            };
+            match state.client.workspace_symbols(params.query).await {
+                Ok(mut r) => {
+                    if let Some(limit) = params.limit {
+                        r.truncate(limit);
+                    }
+                    to_success(r)
+                }
+                Err(e) => IpcResponse::error(ERR_LSP_FAILED, e.to_string()),
+            }
+        }
+
+        "workspace-symbol-resolve" => {
+            let params: WorkspaceSymbolResolveIpcParams = match serde_json::from_value(req.params)
+            {
+                Ok(p) => p,
+                Err(e) => return IpcResponse::error(ERR_INVALID_PARAMS, e.to_string()),
+            };
+            match state.client.workspace_symbol_resolve(params.symbol).await {
+                Ok(r) => to_success(r),
+                Err(e) => IpcResponse::error(ERR_LSP_FAILED, e.to_string()),
+            }
+        }
+
         "incoming-calls" => {
             let params: PositionParams = match serde_json::from_value(req.params) {
                 Ok(p) => p,

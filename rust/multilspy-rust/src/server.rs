@@ -10,6 +10,7 @@ use multilspy_protocol::error::ErrorCodes;
 use multilspy_protocol::json_rpc::{Notification, Request, RequestId, Response, ResponseResult};
 use multilspy_protocol::protocol::common::WorkspaceFolder;
 use multilspy_protocol::protocol::requests::InitializeParams;
+use multilspy_protocol::protocol::responses::{InitializeResult, ServerCapabilities};
 use multilspy_protocol::transport::{
     LSPMessageReceiver, LSPMessageSender, StdioTransport, StdioTransportReader,
     StdioTransportWriter, Transport,
@@ -79,6 +80,7 @@ impl Debug for MessageData {
 pub struct RustAnalyzerServer {
     child: tokio::sync::Mutex<Child>,
     need_send_msg_tx: tokio::sync::mpsc::Sender<MessageData>,
+    initialize_result: tokio::sync::RwLock<Option<InitializeResult>>,
     /// 以request id为key，保存发送请求结果的channel tx，处理lsp server lsp response msg时，
     /// 从map中获取对应的channel tx，将结果发送到tx中
     response_handlers:
@@ -509,6 +511,11 @@ impl RustAnalyzerServer {
             .send_request("initialize".to_string(), Some(params))
             .await?;
         tracing::debug!("resp of initialize server: {:#?}", resp);
+        let initialize_result_value = resp.ok_or_else(|| {
+            ServerError::InitializationFailed("initialize response did not contain a result".to_string())
+        })?;
+        let initialize_result: InitializeResult = serde_json::from_value(initialize_result_value)?;
+        *self.initialize_result.write().await = Some(initialize_result);
 
         tracing::info!("send initialized notification");
         self.send_notification::<()>("initialized".to_string(), None)
@@ -541,6 +548,7 @@ impl RustAnalyzerServer {
         let server = Arc::new(Self {
             child: tokio::sync::Mutex::new(child),
             need_send_msg_tx: request_tx,
+            initialize_result: tokio::sync::RwLock::new(None),
             response_handlers: DashMap::new(),
             request_handlers: DashMap::new(),
             notification_handlers: DashMap::new(),
@@ -574,6 +582,14 @@ impl RustAnalyzerServer {
         tracing::info!("finish shutdown rust analyzer lsp server");
 
         Ok(())
+    }
+
+    pub async fn server_capabilities(&self) -> Option<ServerCapabilities> {
+        self.initialize_result
+            .read()
+            .await
+            .as_ref()
+            .map(|result| result.capabilities.clone())
     }
 
     pub async fn send_request<T: serde::Serialize>(

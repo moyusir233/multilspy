@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
 // Helpers — mirrors multilspy-rust/tests/client_tests.rs conventions
@@ -252,6 +252,8 @@ fn test_help_flag() {
     assert!(out.stdout.contains("implementation"));
     assert!(out.stdout.contains("references"));
     assert!(out.stdout.contains("document-symbols"));
+    assert!(out.stdout.contains("workspace-symbols"));
+    assert!(out.stdout.contains("workspace-symbol-resolve"));
     assert!(out.stdout.contains("incoming-calls"));
     assert!(out.stdout.contains("outgoing-calls"));
     assert!(out.stdout.contains("incoming-calls-recursive"));
@@ -285,6 +287,24 @@ fn test_subcommand_help_references() {
     let out = run_cli_raw(&["references", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--include-declaration"));
+}
+
+#[test]
+fn test_subcommand_help_workspace_symbols() {
+    let out = run_cli_raw(&["workspace-symbols", "--help"]);
+    assert!(out.status.success());
+    assert!(out.stdout.contains("--query"));
+    assert!(out.stdout.contains("--limit"));
+    assert!(out.stdout.contains("WorkspaceSymbol[] | SymbolInformation[]"));
+}
+
+#[test]
+fn test_subcommand_help_workspace_symbol_resolve() {
+    let out = run_cli_raw(&["workspace-symbol-resolve", "--help"]);
+    assert!(out.status.success());
+    assert!(out.stdout.contains("--symbol-json"));
+    assert!(out.stdout.contains("--symbol-file"));
+    assert!(out.stdout.contains("WorkspaceSymbol | null"));
 }
 
 #[test]
@@ -901,6 +921,99 @@ fn test_document_symbols_children() {
         .map(|c| c["name"].as_str().unwrap())
         .collect();
     assert!(child_names.contains(&"name"), "Hello should have 'name' child");
+}
+
+// ---------------------------------------------------------------------------
+// workspace-symbols / workspace-symbol-resolve commands — shared daemon lock
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_workspace_symbols_query() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_shared_daemon_lock();
+    let out = run_cli(&["workspace-symbols", "--query", "helper"]);
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let symbols = result.as_array().expect("result should be an array");
+    assert!(!symbols.is_empty(), "should return workspace symbols");
+
+    let helper = symbols
+        .iter()
+        .find(|symbol| symbol["name"] == "helper")
+        .expect("should contain helper symbol");
+    assert_eq!(helper["kind"], json!(12));
+}
+
+#[test]
+fn test_workspace_symbols_limit() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_shared_daemon_lock();
+    let out = run_cli(&["workspace-symbols", "--query", "e", "--limit", "1"]);
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let symbols = result.as_array().expect("result should be an array");
+    assert!(symbols.len() <= 1, "limit should cap result length");
+}
+
+#[test]
+fn test_workspace_symbols_blank_query_returns_json_error() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_shared_daemon_lock();
+    let out = run_cli(&["workspace-symbols", "--query", "   "]);
+    assert!(!out.status.success());
+    let error = assert_error_response(&out.stdout);
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("must not be empty or whitespace-only")
+    );
+}
+
+#[test]
+fn test_workspace_symbol_resolve() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_shared_daemon_lock();
+
+    let search = run_cli(&["workspace-symbols", "--query", "helper"]);
+    assert!(search.status.success(), "stderr: {}", search.stderr);
+    let result = assert_success_result(&search.stdout);
+    let symbols = result.as_array().expect("result should be an array");
+    let helper = symbols
+        .iter()
+        .find(|symbol| symbol["name"] == "helper")
+        .expect("should contain helper symbol");
+    let helper_json = serde_json::to_string(helper).unwrap();
+
+    let resolve = run_cli(&[
+        "workspace-symbol-resolve",
+        "--symbol-json",
+        &helper_json,
+    ]);
+    if resolve.status.success() {
+        let resolved = assert_success_result(&resolve.stdout);
+        assert_eq!(resolved["name"], json!("helper"));
+        assert!(resolved["location"]["uri"].as_str().unwrap().ends_with("main.rs"));
+        assert_eq!(resolved["location"]["range"]["start"]["line"], json!(34));
+    } else {
+        let error = assert_error_response(&resolve.stdout);
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("does not advertise support for workspaceSymbol/resolve"),
+            "unexpected resolve error: {}",
+            resolve.stdout
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

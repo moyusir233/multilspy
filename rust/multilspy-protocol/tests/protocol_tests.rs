@@ -2,6 +2,7 @@
 use multilspy_protocol::protocol::common::*;
 use multilspy_protocol::protocol::requests::*;
 use multilspy_protocol::protocol::responses::*;
+use serde_json::json;
 
 #[test]
 fn test_position_serialization() {
@@ -86,4 +87,75 @@ fn test_call_hierarchy_item_serialization() {
     let serialized = serde_json::to_string(&item).unwrap();
     let deserialized: CallHierarchyItem = serde_json::from_str(&serialized).unwrap();
     assert_eq!(item, deserialized);
+}
+
+#[test]
+fn test_workspace_symbol_params_serialization() {
+    let params = WorkspaceSymbolParams {
+        query: "helper".to_string(),
+    };
+    let serialized = serde_json::to_string(&params).unwrap();
+    let deserialized: WorkspaceSymbolParams = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(params, deserialized);
+}
+
+#[test]
+fn test_workspace_symbol_item_deserializes_workspace_symbol_with_uri_only_location() {
+    let raw = json!({
+        "name": "helper",
+        "kind": 12,
+        "location": { "uri": "file:///workspace/src/main.rs" },
+        "containerName": "main",
+        "data": { "id": 1 }
+    });
+    let item: WorkspaceSymbolItem = serde_json::from_value(raw).unwrap();
+
+    match item {
+        WorkspaceSymbolItem::WorkspaceSymbol(symbol) => {
+            assert_eq!(symbol.name, "helper");
+            assert!(matches!(
+                symbol.location,
+                WorkspaceSymbolLocation::UriOnly(WorkspaceSymbolUriLocation { .. })
+            ));
+        }
+        other => panic!("expected WorkspaceSymbol variant, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_workspace_symbol_item_deserializes_symbol_information() {
+    let raw = json!({
+        "name": "helper",
+        "kind": 12,
+        "location": {
+            "uri": "file:///workspace/src/main.rs",
+            "range": {
+                "start": { "line": 34, "character": 0 },
+                "end": { "line": 37, "character": 1 }
+            }
+        },
+        "containerName": "main"
+    });
+    let item: WorkspaceSymbolItem = serde_json::from_value(raw).unwrap();
+
+    match item {
+        WorkspaceSymbolItem::SymbolInformation(symbol) => {
+            assert_eq!(symbol.location.range.start.line, 34);
+        }
+        other => panic!("expected SymbolInformation variant, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_workspace_symbol_provider_capability_resolve_support() {
+    let capabilities: ServerCapabilities = serde_json::from_value(json!({
+        "workspaceSymbolProvider": {
+            "workDoneProgress": true,
+            "resolveProvider": true
+        }
+    }))
+    .unwrap();
+
+    assert!(capabilities.supports_workspace_symbol());
+    assert!(capabilities.supports_workspace_symbol_resolve());
 }
