@@ -1,6 +1,5 @@
 use futures_lite::{FutureExt, future::Boxed};
 
-
 pub trait RequestMsgHandler: Send + Sync + 'static {
     fn handle_request(
         &self,

@@ -1,7 +1,7 @@
-use multilspy_rust::{LSPClient, RustAnalyzerConfig};
 use multilspy_protocol::protocol::common::{
     WorkspaceSymbol, WorkspaceSymbolItem, WorkspaceSymbolLocation,
 };
+use multilspy_rust::{LSPClient, RustAnalyzerConfig};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -33,7 +33,9 @@ fn make_config() -> RustAnalyzerConfig {
 }
 
 async fn make_client() -> LSPClient {
-    LSPClient::new(make_config()).await.expect("LSPClient::new should succeed")
+    LSPClient::new(make_config())
+        .await
+        .expect("LSPClient::new should succeed")
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +138,10 @@ async fn test_definition_of_function_call() {
 
     // line 35: `let h = create_hello("world");` — cursor on `create_hello` (char 12)
     let result = client.definition(uri.clone(), 35, 12).await.unwrap();
-    assert!(!result.is_empty(), "definition should return at least one location");
+    assert!(
+        !result.is_empty(),
+        "definition should return at least one location"
+    );
     let loc = &result[0];
     assert!(loc.uri.ends_with("main.rs"));
     // `create_hello` is defined at line 24
@@ -155,7 +160,10 @@ async fn test_definition_of_trait_method_call() {
 
     // line 31: `g.greet()` — cursor on `greet` (char 6)
     let result = client.definition(uri.clone(), 31, 6).await.unwrap();
-    assert!(!result.is_empty(), "definition of trait method call should return at least one location");
+    assert!(
+        !result.is_empty(),
+        "definition of trait method call should return at least one location"
+    );
     let loc = &result[0];
     assert!(loc.uri.ends_with("main.rs"));
     // `greet` is declared in the trait at line 1
@@ -214,7 +222,10 @@ async fn test_type_definition_of_variable() {
 
     // line 35: `let h = create_hello("world");` — cursor on `h` (char 8)
     let result = client.type_definition(uri.clone(), 35, 8).await.unwrap();
-    assert!(!result.is_empty(), "type_definition should return at least one location");
+    assert!(
+        !result.is_empty(),
+        "type_definition should return at least one location"
+    );
     let loc = &result[0];
     assert!(loc.uri.ends_with("main.rs"));
     // `h` has type `Hello`, defined at line 4
@@ -236,7 +247,12 @@ async fn test_type_definition_of_function_return() {
     assert!(!result.is_empty());
     let loc = &result[0];
     // `result` has type `String`; the type_definition should point into std
-    assert!(loc.uri.contains("string") || loc.uri.contains("alloc") || loc.uri.contains("String") || !loc.uri.is_empty());
+    assert!(
+        loc.uri.contains("string")
+            || loc.uri.contains("alloc")
+            || loc.uri.contains("String")
+            || !loc.uri.is_empty()
+    );
 
     client.shutdown().await.unwrap();
 }
@@ -254,10 +270,7 @@ async fn test_references_include_declaration() {
     let uri = file_uri();
 
     // line 24: `fn create_hello` — cursor on `create_hello` (char 5), include_declaration=true
-    let result = client
-        .references(uri.clone(), 24, 5, true)
-        .await
-        .unwrap();
+    let result = client.references(uri.clone(), 24, 5, true).await.unwrap();
     // Should include the declaration itself + the call at line 35
     assert!(
         result.len() >= 2,
@@ -280,10 +293,7 @@ async fn test_references_exclude_declaration() {
     let uri = file_uri();
 
     // line 24: `fn create_hello` — cursor on `create_hello` (char 5), include_declaration=false
-    let result = client
-        .references(uri.clone(), 24, 5, false)
-        .await
-        .unwrap();
+    let result = client.references(uri.clone(), 24, 5, false).await.unwrap();
     assert!(
         !result.is_empty(),
         "references without declaration should return at least 1 location"
@@ -327,14 +337,23 @@ async fn test_document_symbols() {
     let uri = file_uri();
 
     let symbols = client.document_symbols(uri.clone()).await.unwrap();
-    assert!(!symbols.is_empty(), "document_symbols should return symbols");
+    assert!(
+        !symbols.is_empty(),
+        "document_symbols should return symbols"
+    );
 
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(&"Greeter"), "should contain Greeter trait");
     assert!(names.contains(&"Hello"), "should contain Hello struct");
     assert!(names.contains(&"Goodbye"), "should contain Goodbye struct");
-    assert!(names.contains(&"create_hello"), "should contain create_hello function");
-    assert!(names.contains(&"call_greet"), "should contain call_greet function");
+    assert!(
+        names.contains(&"create_hello"),
+        "should contain create_hello function"
+    );
+    assert!(
+        names.contains(&"call_greet"),
+        "should contain call_greet function"
+    );
     assert!(names.contains(&"helper"), "should contain helper function");
     assert!(names.contains(&"main"), "should contain main function");
 
@@ -408,7 +427,10 @@ async fn test_implementation_of_trait() {
 
     let lines: Vec<u32> = result.iter().map(|loc| loc.range.start.line).collect();
     assert!(lines.contains(&8), "should contain impl at line 8 (Hello)");
-    assert!(lines.contains(&18), "should contain impl at line 18 (Goodbye)");
+    assert!(
+        lines.contains(&18),
+        "should contain impl at line 18 (Goodbye)"
+    );
 
     client.shutdown().await.unwrap();
 }
@@ -431,7 +453,10 @@ async fn test_implementation_of_trait_method() {
 
     let lines: Vec<u32> = result.iter().map(|loc| loc.range.start.line).collect();
     assert!(lines.contains(&9), "should contain Hello::greet at line 9");
-    assert!(lines.contains(&19), "should contain Goodbye::greet at line 19");
+    assert!(
+        lines.contains(&19),
+        "should contain Goodbye::greet at line 19"
+    );
 
     client.shutdown().await.unwrap();
 }
@@ -468,7 +493,10 @@ async fn test_workspace_symbols_query() {
     }
     let client = make_client().await;
 
-    let result = client.workspace_symbols("helper".to_string()).await.unwrap();
+    let result = client
+        .workspace_symbols("helper".to_string())
+        .await
+        .unwrap();
     assert!(
         !result.is_empty(),
         "workspace_symbols should return at least one matching symbol"
@@ -535,9 +563,7 @@ async fn test_workspace_symbol_resolve() {
             WorkspaceSymbolItem::SymbolInformation(symbol) if symbol.name == "helper" => {
                 Some(WorkspaceSymbol::from_symbol_information(symbol))
             }
-            WorkspaceSymbolItem::WorkspaceSymbol(symbol) if symbol.name == "helper" => {
-                Some(symbol)
-            }
+            WorkspaceSymbolItem::WorkspaceSymbol(symbol) if symbol.name == "helper" => Some(symbol),
             _ => None,
         })
         .expect("should return a symbol named helper");
@@ -551,7 +577,10 @@ async fn test_workspace_symbol_resolve() {
                     assert_eq!(location.range.start.line, 34);
                 }
                 WorkspaceSymbolLocation::UriOnly(location) => {
-                    panic!("expected resolved location range, got URI only: {}", location.uri);
+                    panic!(
+                        "expected resolved location range, got URI only: {}",
+                        location.uri
+                    );
                 }
             }
         }
@@ -583,8 +612,14 @@ async fn test_prepare_call_hierarchy() {
     let uri = file_uri();
 
     // line 34: `fn helper()` — cursor on `helper` (char 3)
-    let items = client.prepare_call_hierarchy(uri.clone(), 34, 5).await.unwrap();
-    assert!(!items.is_empty(), "prepare_call_hierarchy should return items");
+    let items = client
+        .prepare_call_hierarchy(uri.clone(), 34, 5)
+        .await
+        .unwrap();
+    assert!(
+        !items.is_empty(),
+        "prepare_call_hierarchy should return items"
+    );
 
     let item = &items[0];
     assert_eq!(item.name, "helper");
@@ -604,7 +639,10 @@ async fn test_prepare_call_hierarchy_on_struct_returns_empty_or_item() {
     // line 4: `struct Hello {` — cursor on `Hello` (char 7)
     // Call hierarchy on a struct may return empty or a single item depending on RA version
     let result = client.prepare_call_hierarchy(uri.clone(), 4, 7).await;
-    assert!(result.is_ok(), "should not error even for non-function symbols");
+    assert!(
+        result.is_ok(),
+        "should not error even for non-function symbols"
+    );
 
     client.shutdown().await.unwrap();
 }
@@ -622,7 +660,10 @@ async fn test_incoming_calls() {
     let uri = file_uri();
 
     // line 34: `fn helper()` — prepare then get incoming calls
-    let items = client.prepare_call_hierarchy(uri.clone(), 34, 5).await.unwrap();
+    let items = client
+        .prepare_call_hierarchy(uri.clone(), 34, 5)
+        .await
+        .unwrap();
     assert!(!items.is_empty());
 
     let incoming = client.incoming_calls(items[0].clone()).await.unwrap();
@@ -649,7 +690,10 @@ async fn test_incoming_calls_of_leaf_function() {
     let uri = file_uri();
 
     // line 39: `fn main()` — main is not called by anyone in the module
-    let items = client.prepare_call_hierarchy(uri.clone(), 39, 5).await.unwrap();
+    let items = client
+        .prepare_call_hierarchy(uri.clone(), 39, 5)
+        .await
+        .unwrap();
     assert!(!items.is_empty());
 
     let incoming = client.incoming_calls(items[0].clone()).await.unwrap();
@@ -674,7 +718,10 @@ async fn test_outgoing_calls() {
     let uri = file_uri();
 
     // line 34: `fn helper()` — calls create_hello and call_greet
-    let items = client.prepare_call_hierarchy(uri.clone(), 34, 5).await.unwrap();
+    let items = client
+        .prepare_call_hierarchy(uri.clone(), 34, 5)
+        .await
+        .unwrap();
     assert!(!items.is_empty());
 
     let outgoing = client.outgoing_calls(items[0].clone()).await.unwrap();
@@ -705,13 +752,19 @@ async fn test_outgoing_calls_of_leaf() {
     let uri = file_uri();
 
     // line 24: `fn create_hello(name: &str) -> Hello {` — calls to_string only
-    let items = client.prepare_call_hierarchy(uri.clone(), 24, 5).await.unwrap();
+    let items = client
+        .prepare_call_hierarchy(uri.clone(), 24, 5)
+        .await
+        .unwrap();
     assert!(!items.is_empty());
 
     let outgoing = client.outgoing_calls(items[0].clone()).await.unwrap();
     // create_hello calls `name.to_string()` and constructs Hello
     // At minimum it should not error
-    assert!(!outgoing.is_empty(), "create_hello should have at least one outgoing call (to_string)");
+    assert!(
+        !outgoing.is_empty(),
+        "create_hello should have at least one outgoing call (to_string)"
+    );
 
     client.shutdown().await.unwrap();
 }
@@ -769,7 +822,8 @@ async fn test_incoming_calls_recursive_with_depth_limit() {
         .unwrap();
     assert!(!results.is_empty());
 
-    let depth_0_item_names: Vec<&str> = results.iter().map(|(item, _)| item.name.as_str()).collect();
+    let depth_0_item_names: Vec<&str> =
+        results.iter().map(|(item, _)| item.name.as_str()).collect();
     assert!(
         depth_0_item_names.contains(&"create_hello"),
         "first item should be create_hello"
@@ -841,7 +895,8 @@ async fn test_outgoing_calls_recursive_with_depth_limit() {
         .unwrap();
     assert!(!results.is_empty());
 
-    let depth_0_item_names: Vec<&str> = results.iter().map(|(item, _)| item.name.as_str()).collect();
+    let depth_0_item_names: Vec<&str> =
+        results.iter().map(|(item, _)| item.name.as_str()).collect();
     assert!(
         depth_0_item_names.contains(&"main"),
         "first item should be main"
@@ -874,7 +929,10 @@ async fn test_definition_at_whitespace_returns_empty() {
     // line 3: empty line `\n` — should return empty or handle gracefully
     let result = client.definition(uri.clone(), 3, 0).await;
     if let Ok(locations) = result {
-        assert!(locations.is_empty(), "definition on blank line should be empty");
+        assert!(
+            locations.is_empty(),
+            "definition on blank line should be empty"
+        );
     }
 
     client.shutdown().await.unwrap();
@@ -941,6 +999,85 @@ async fn test_definition_out_of_range_position() {
     if let Ok(locations) = result {
         assert!(locations.is_empty());
     }
+
+    client.shutdown().await.unwrap();
+}
+
+fn src_dir_uri() -> String {
+    let src_dir = test_project_root()
+        .join("src")
+        .canonicalize()
+        .expect("test-rust-project/src must exist");
+    format!("file://{}", src_dir.display())
+}
+
+// ---------------------------------------------------------------------------
+// LSPClient::analyze_trait_impl_deps_graph
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client
+        .analyze_trait_impl_deps_graph(vec!["DefinitelyNotATrait".to_string()], src_dir_uri())
+        .await
+        .unwrap();
+    assert!(result.is_empty());
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client
+        .analyze_trait_impl_deps_graph(vec!["Marker".to_string()], src_dir_uri())
+        .await
+        .unwrap();
+    assert!(result.is_empty());
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client
+        .analyze_trait_impl_deps_graph(vec!["Chain".to_string()], src_dir_uri())
+        .await
+        .unwrap();
+    assert!(!result.is_empty());
+
+    let chain_a = result
+        .iter()
+        .find(|item| item.trait_name == "Chain" && item.function_name.ends_with("::a"));
+    let chain_b = result
+        .iter()
+        .find(|item| item.trait_name == "Chain" && item.function_name.ends_with("::b"));
+    let chain_a = chain_a.expect("should include Chain::a");
+    let chain_b = chain_b.expect("should include Chain::b");
+
+    let b_id = format!(
+        "{}#L{}:{}",
+        chain_b.file_uri, chain_b.range.start.line, chain_b.range.start.character
+    );
+    assert!(
+        chain_a.dependencies.iter().any(|d| d == &b_id),
+        "expected Chain::a to depend on Chain::b (missing id: {})",
+        b_id
+    );
 
     client.shutdown().await.unwrap();
 }

@@ -177,18 +177,16 @@ impl<'de> Deserialize<'de> for ErrorCodes {
             where
                 E: de::Error,
             {
-                ErrorCodes::from_code(value as i32).ok_or_else(|| {
-                    de::Error::custom(format!("unknown LSP error code: {}", value))
-                })
+                ErrorCodes::from_code(value as i32)
+                    .ok_or_else(|| de::Error::custom(format!("unknown LSP error code: {}", value)))
             }
 
             fn visit_u64<E>(self, value: u64) -> Result<ErrorCodes, E>
             where
                 E: de::Error,
             {
-                ErrorCodes::from_code(value as i32).ok_or_else(|| {
-                    de::Error::custom(format!("unknown LSP error code: {}", value))
-                })
+                ErrorCodes::from_code(value as i32)
+                    .ok_or_else(|| de::Error::custom(format!("unknown LSP error code: {}", value)))
             }
         }
 

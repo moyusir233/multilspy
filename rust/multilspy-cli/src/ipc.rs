@@ -82,6 +82,12 @@ pub struct WorkspaceSymbolResolveIpcParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyzeTraitImplDepsGraphIpcParams {
+    pub trait_names: Vec<String>,
+    pub target_dir_uri: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub workspace: String,
     pub pid: u32,

@@ -512,7 +512,9 @@ impl RustAnalyzerServer {
             .await?;
         tracing::debug!("resp of initialize server: {:#?}", resp);
         let initialize_result_value = resp.ok_or_else(|| {
-            ServerError::InitializationFailed("initialize response did not contain a result".to_string())
+            ServerError::InitializationFailed(
+                "initialize response did not contain a result".to_string(),
+            )
         })?;
         let initialize_result: InitializeResult = serde_json::from_value(initialize_result_value)?;
         *self.initialize_result.write().await = Some(initialize_result);

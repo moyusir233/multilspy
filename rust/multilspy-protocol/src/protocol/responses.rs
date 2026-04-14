@@ -33,8 +33,8 @@
 //! | [`CallHierarchyIncomingCallsResponse`] | `Vec<CallHierarchyIncomingCall>` | `callHierarchy/incomingCalls` |
 //! | [`CallHierarchyOutgoingCallsResponse`] | `Vec<CallHierarchyOutgoingCall>` | `callHierarchy/outgoingCalls` |
 
-use serde::{Deserialize, Serialize};
 use super::common::*;
+use serde::{Deserialize, Serialize};
 
 /// Result of the `initialize` request.
 ///

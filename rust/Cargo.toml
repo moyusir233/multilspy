@@ -45,10 +45,10 @@ axum="0.8"
 reqwest={ version="0.13", features=[
     "json",
 ] }
-criterion="0.5"
 fluent-uri="0.4.1"
 dashmap="6.1.0"
 futures-lite="2.6.1"
+petgraph="0.8"
 
 multilspy-protocol={ path="multilspy-protocol" }
 multilspy-rust    ={ path="multilspy-rust" }

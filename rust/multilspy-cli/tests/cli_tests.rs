@@ -243,7 +243,10 @@ fn test_help_flag() {
     let out = run_cli_raw(&["--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("LSP CLI for AI agents"));
-    assert!(out.stdout.contains("--wait-work-done-progress-create-max-time"));
+    assert!(
+        out.stdout
+            .contains("--wait-work-done-progress-create-max-time")
+    );
     assert!(out.stdout.contains("RA_LSP_INIT_PARAMS_PATH"));
     assert!(out.stdout.contains("--relative-path"));
     assert!(out.stdout.contains("JSON Output"));
@@ -258,6 +261,7 @@ fn test_help_flag() {
     assert!(out.stdout.contains("outgoing-calls"));
     assert!(out.stdout.contains("incoming-calls-recursive"));
     assert!(out.stdout.contains("outgoing-calls-recursive"));
+    assert!(out.stdout.contains("analyze-trait-impl-deps-graph"));
     assert!(out.stdout.contains("status"));
     assert!(out.stdout.contains("stop"));
 }
@@ -295,7 +299,10 @@ fn test_subcommand_help_workspace_symbols() {
     assert!(out.status.success());
     assert!(out.stdout.contains("--query"));
     assert!(out.stdout.contains("--limit"));
-    assert!(out.stdout.contains("WorkspaceSymbol[] | SymbolInformation[]"));
+    assert!(
+        out.stdout
+            .contains("WorkspaceSymbol[] | SymbolInformation[]")
+    );
 }
 
 #[test]
@@ -313,7 +320,10 @@ fn test_subcommand_help_incoming_calls_recursive() {
     assert!(out.status.success());
     assert!(out.stdout.contains("--max-depth"));
     assert!(out.stdout.contains("--relative-path"));
-    assert!(out.stdout.contains("[[CallHierarchyItem, CallHierarchyIncomingCall[]], ...]"));
+    assert!(
+        out.stdout
+            .contains("[[CallHierarchyItem, CallHierarchyIncomingCall[]], ...]")
+    );
 }
 
 #[test]
@@ -323,7 +333,18 @@ fn test_subcommand_help_status() {
     assert!(out.stdout.contains("RA_LSP_INIT_PARAMS_PATH"));
     assert!(out.stdout.contains("JSON Output"));
     assert!(out.stdout.contains("\"workspace\": string"));
-    assert!(out.stdout.contains("--relative-path` is not applicable to `status`"));
+    assert!(
+        out.stdout
+            .contains("--relative-path` is not applicable to `status`")
+    );
+}
+
+#[test]
+fn test_subcommand_help_analyze_trait_impl_deps_graph() {
+    let out = run_cli_raw(&["analyze-trait-impl-deps-graph", "--help"]);
+    assert!(out.status.success());
+    assert!(out.stdout.contains("TRAIT... TARGET_DIR"));
+    assert!(out.stdout.contains("JSON Output"));
 }
 
 // ---------------------------------------------------------------------------
@@ -348,13 +369,7 @@ fn test_definition_missing_uri() {
 
 #[test]
 fn test_definition_missing_line() {
-    let out = run_cli_raw(&[
-        "definition",
-        "--uri",
-        "file:///test.rs",
-        "--character",
-        "0",
-    ]);
+    let out = run_cli_raw(&["definition", "--uri", "file:///test.rs", "--character", "0"]);
     assert!(!out.status.success());
 }
 
@@ -368,6 +383,16 @@ fn test_definition_missing_character() {
 fn test_unknown_subcommand() {
     let out = run_cli_raw(&["nonexistent-command"]);
     assert!(!out.status.success());
+}
+
+#[test]
+fn test_analyze_trait_impl_deps_graph_missing_target_dir() {
+    let out = run_cli_raw(&["analyze-trait-impl-deps-graph", "Greeter"]);
+    assert!(!out.status.success());
+    assert!(
+        out.stderr.contains("Usage") || out.stdout.contains("Usage"),
+        "should show usage info"
+    );
 }
 
 #[test]
@@ -402,7 +427,12 @@ fn test_invalid_env_initialize_params_file_returns_json_error() {
     );
     assert!(!out.status.success());
     let error = assert_error_response(&out.stdout);
-    assert!(error["message"].as_str().unwrap().contains("file does not exist"));
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("file does not exist")
+    );
 
     std::fs::remove_dir_all(missing_dir).unwrap();
 }
@@ -449,7 +479,11 @@ fn test_output_is_valid_json() {
     ]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let parsed: Result<Value, _> = serde_json::from_str(out.stdout.trim());
-    assert!(parsed.is_ok(), "stdout should be valid JSON: {}", out.stdout);
+    assert!(
+        parsed.is_ok(),
+        "stdout should be valid JSON: {}",
+        out.stdout
+    );
 }
 
 #[test]
@@ -470,7 +504,10 @@ fn test_success_response_has_result_field() {
     ]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let resp = parse_ipc_response(&out.stdout);
-    assert!(resp.get("result").is_some(), "response should have 'result'");
+    assert!(
+        resp.get("result").is_some(),
+        "response should have 'result'"
+    );
     assert!(
         resp.get("error").is_none(),
         "success response should not have 'error'"
@@ -915,12 +952,17 @@ fn test_document_symbols_children() {
     let symbols = result.as_array().unwrap();
 
     let hello = symbols.iter().find(|s| s["name"] == "Hello").unwrap();
-    let children = hello["children"].as_array().expect("Hello should have children");
+    let children = hello["children"]
+        .as_array()
+        .expect("Hello should have children");
     let child_names: Vec<&str> = children
         .iter()
         .map(|c| c["name"].as_str().unwrap())
         .collect();
-    assert!(child_names.contains(&"name"), "Hello should have 'name' child");
+    assert!(
+        child_names.contains(&"name"),
+        "Hello should have 'name' child"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -993,15 +1035,16 @@ fn test_workspace_symbol_resolve() {
         .expect("should contain helper symbol");
     let helper_json = serde_json::to_string(helper).unwrap();
 
-    let resolve = run_cli(&[
-        "workspace-symbol-resolve",
-        "--symbol-json",
-        &helper_json,
-    ]);
+    let resolve = run_cli(&["workspace-symbol-resolve", "--symbol-json", &helper_json]);
     if resolve.status.success() {
         let resolved = assert_success_result(&resolve.stdout);
         assert_eq!(resolved["name"], json!("helper"));
-        assert!(resolved["location"]["uri"].as_str().unwrap().ends_with("main.rs"));
+        assert!(
+            resolved["location"]["uri"]
+                .as_str()
+                .unwrap()
+                .ends_with("main.rs")
+        );
         assert_eq!(resolved["location"]["range"]["start"]["line"], json!(34));
     } else {
         let error = assert_error_response(&resolve.stdout);
@@ -1045,10 +1088,7 @@ fn test_incoming_calls() {
         .iter()
         .map(|c| c["from"]["name"].as_str().unwrap())
         .collect();
-    assert!(
-        caller_names.contains(&"main"),
-        "main should call helper"
-    );
+    assert!(caller_names.contains(&"main"), "main should call helper");
 }
 
 #[test]
@@ -1070,10 +1110,7 @@ fn test_incoming_calls_of_leaf_function() {
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let result = assert_success_result(&out.stdout);
     let calls = result.as_array().unwrap();
-    assert!(
-        calls.is_empty(),
-        "main should have no incoming calls"
-    );
+    assert!(calls.is_empty(), "main should have no incoming calls");
 }
 
 // ---------------------------------------------------------------------------
@@ -1335,6 +1372,168 @@ fn test_outgoing_calls_recursive_with_depth_limit() {
 }
 
 // ---------------------------------------------------------------------------
+// analyze-trait-impl-deps-graph command — shared daemon lock
+// ---------------------------------------------------------------------------
+
+fn src_dir_uri() -> String {
+    let src_dir = test_project_root()
+        .join("src")
+        .canonicalize()
+        .expect("test-rust-project/src must exist");
+    format!("file://{}", src_dir.display())
+}
+
+#[test]
+fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_exclusive_daemon_lock();
+    stop_daemon();
+
+    let missing_parent = unique_temp_dir("missing-analyze-dir");
+    let missing_dir = missing_parent.join("does-not-exist");
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "Greeter",
+        &missing_dir.display().to_string(),
+    ]);
+    assert!(!out.status.success());
+    let error = assert_error_response(&out.stdout);
+    assert_eq!(error["code"], json!(-32602));
+
+    let _ = std::fs::remove_dir_all(missing_parent);
+}
+
+#[test]
+fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_exclusive_daemon_lock();
+    stop_daemon();
+
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "DefinitelyNotATrait",
+        &src_dir_uri(),
+    ]);
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(items.is_empty());
+}
+
+#[test]
+fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_exclusive_daemon_lock();
+    stop_daemon();
+
+    let empty_dir = test_project_root().join("src").join("_empty_analyze_dir");
+    std::fs::create_dir_all(&empty_dir).expect("failed to create empty directory");
+    let empty_uri = format!(
+        "file://{}",
+        empty_dir
+            .canonicalize()
+            .expect("empty directory must exist")
+            .display()
+    );
+
+    let out = run_cli(&["analyze-trait-impl-deps-graph", "Greeter", &empty_uri]);
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(items.is_empty());
+
+    let _ = std::fs::remove_dir_all(empty_dir);
+}
+
+#[test]
+fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_exclusive_daemon_lock();
+    stop_daemon();
+
+    let out = run_cli(&["analyze-trait-impl-deps-graph", "Marker", &src_dir_uri()]);
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(items.is_empty());
+}
+
+#[test]
+fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_exclusive_daemon_lock();
+    stop_daemon();
+
+    let out = run_cli(&["analyze-trait-impl-deps-graph", "Chain", &src_dir_uri()]);
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(!items.is_empty());
+
+    let mut chain_a = None;
+    let mut chain_b = None;
+    for item in items {
+        if item["trait_name"] == json!("Chain")
+            && item["file_uri"].as_str().unwrap().ends_with("main.rs")
+        {
+            let name = item["function_name"].as_str().unwrap_or("");
+            if name.ends_with("::a") {
+                chain_a = Some(item.clone());
+            } else if name.ends_with("::b") {
+                chain_b = Some(item.clone());
+            }
+        }
+    }
+
+    let chain_a = chain_a.expect("should include Chain::a");
+    let chain_b = chain_b.expect("should include Chain::b");
+
+    let b_file_uri = chain_b["file_uri"].as_str().unwrap();
+    let b_start_line = chain_b["range"]["start"]["line"].as_u64().unwrap();
+    let b_start_char = chain_b["range"]["start"]["character"].as_u64().unwrap();
+    let b_id = format!("{}#L{}:{}", b_file_uri, b_start_line, b_start_char);
+
+    let deps = chain_a["dependencies"].as_array().unwrap();
+    assert!(
+        deps.iter().any(|d| d.as_str() == Some(&b_id)),
+        "expected Chain::a to depend on Chain::b (missing id: {})",
+        b_id
+    );
+}
+
+#[test]
+fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let _guard = acquire_exclusive_daemon_lock();
+    stop_daemon();
+
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "Greeter",
+        "Chain",
+        &src_dir_uri(),
+    ]);
+    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(!items.is_empty());
+    assert!(items.iter().any(|i| i["trait_name"] == json!("Greeter")));
+    assert!(items.iter().any(|i| i["trait_name"] == json!("Chain")));
+}
+
+// ---------------------------------------------------------------------------
 // Daemon lifecycle: status, stop, auto-spawn — EXCLUSIVE daemon lock
 // ---------------------------------------------------------------------------
 
@@ -1347,7 +1546,10 @@ fn test_status_command() {
     let out = run_cli(&["status"]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let result = assert_success_result(&out.stdout);
-    assert!(result.get("workspace").is_some(), "status should report workspace");
+    assert!(
+        result.get("workspace").is_some(),
+        "status should report workspace"
+    );
     assert!(result.get("pid").is_some(), "status should report pid");
     assert!(result.get("port").is_some(), "status should report port");
     assert!(
@@ -1506,11 +1708,7 @@ fn test_document_symbols_with_invalid_uri() {
         return;
     }
     let _guard = acquire_shared_daemon_lock();
-    let out = run_cli(&[
-        "document-symbols",
-        "--uri",
-        "file:///nonexistent/file.rs",
-    ]);
+    let out = run_cli(&["document-symbols", "--uri", "file:///nonexistent/file.rs"]);
     if out.status.success() {
         let result = assert_success_result(&out.stdout);
         let symbols = result.as_array().unwrap();

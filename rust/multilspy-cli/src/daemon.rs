@@ -224,8 +224,7 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
         }
 
         "workspace-symbol-resolve" => {
-            let params: WorkspaceSymbolResolveIpcParams = match serde_json::from_value(req.params)
-            {
+            let params: WorkspaceSymbolResolveIpcParams = match serde_json::from_value(req.params) {
                 Ok(p) => p,
                 Err(e) => return IpcResponse::error(ERR_INVALID_PARAMS, e.to_string()),
             };
@@ -314,6 +313,22 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
                     params.character,
                     params.max_depth,
                 )
+                .await
+            {
+                Ok(r) => to_success(r),
+                Err(e) => IpcResponse::error(ERR_LSP_FAILED, e.to_string()),
+            }
+        }
+
+        "analyze-trait-impl-deps-graph" => {
+            let params: AnalyzeTraitImplDepsGraphIpcParams =
+                match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => return IpcResponse::error(ERR_INVALID_PARAMS, e.to_string()),
+                };
+            match state
+                .client
+                .analyze_trait_impl_deps_graph(params.trait_names, params.target_dir_uri)
                 .await
             {
                 Ok(r) => to_success(r),

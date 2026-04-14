@@ -201,6 +201,20 @@ JSON Output:
     `{ "result": [[{ "name": "main", "kind": 12, "uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 39, "character": 0 }, "end": { "line": 42, "character": 1 } }, "selectionRange": { "start": { "line": 39, "character": 3 }, "end": { "line": 39, "character": 7 } } }, [{ "to": { "name": "helper", "kind": 12, "uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 34, "character": 0 }, "end": { "line": 37, "character": 1 } }, "selectionRange": { "start": { "line": 34, "character": 3 }, "end": { "line": 34, "character": 9 } } }, "fromRanges": [{ "start": { "line": 40, "character": 4 }, "end": { "line": 40, "character": 10 } }] }]]] }`
 "#;
 
+const ANALYZE_TRAIT_IMPL_DEPS_GRAPH_HELP: &str = r#"Input:
+  - Pass 2+ positional args: 1+ trait names, then a target directory.
+  - Target directory can be a relative path or a full `file://` URI.
+  - Example:
+    `multilspy analyze-trait-impl-deps-graph Greeter Display ./src`
+    `multilspy analyze-trait-impl-deps-graph Greeter file:///workspace/src`
+
+JSON Output:
+  - Success schema: `{ "result": TraitImplDepsGraphItem[] }`
+  - Empty matches return `{ "result": [] }`
+  - Example item:
+    `{ "trait_name": "Greeter", "function_name": "impl Greeter for Person::greet", "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 12, "character": 1 } }, "dependencies": ["file:///workspace/src/main.rs#L34:0"] }`
+"#;
+
 const STATUS_HELP: &str = r#"Initialize Params:
   - `RA_LSP_INIT_PARAMS_PATH` provides a base initialize params JSON file.
   - `--initialize-params` overrides matching fields from that JSON file.
@@ -510,6 +524,15 @@ enum Command {
     },
 
     #[command(
+        about = "Analyze dependencies between functions implementing specified traits",
+        after_help = ANALYZE_TRAIT_IMPL_DEPS_GRAPH_HELP
+    )]
+    AnalyzeTraitImplDepsGraph {
+        #[arg(value_name = "TRAIT... TARGET_DIR", num_args = 2..)]
+        args: Vec<String>,
+    },
+
+    #[command(
         about = "Show daemon status for the current workspace",
         after_help = STATUS_HELP
     )]
@@ -787,6 +810,23 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
             })?,
         ),
 
+        Command::AnalyzeTraitImplDepsGraph { args } => {
+            if args.len() < 2 {
+                anyhow::bail!(
+                    "expected 2+ args: 1+ trait names followed by a target directory path or file:// URI"
+                );
+            }
+            let (trait_names, target_dir) = args.split_at(args.len() - 1);
+            let target_dir_uri = resolve_target_dir_to_file_uri(&target_dir[0])?;
+            (
+                "analyze-trait-impl-deps-graph",
+                serde_json::to_value(ipc::AnalyzeTraitImplDepsGraphIpcParams {
+                    trait_names: trait_names.to_vec(),
+                    target_dir_uri,
+                })?,
+            )
+        }
+
         Command::Status => ("status", serde_json::json!(null)),
 
         Command::Stop => ("shutdown", serde_json::json!(null)),
@@ -836,6 +876,22 @@ fn resolve_relative_path_to_file_uri(input_path: &Path) -> anyhow::Result<String
             )
         })
         .map(|url| url.to_string())
+}
+
+fn resolve_target_dir_to_file_uri(input: &str) -> anyhow::Result<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("target directory must not be empty");
+    }
+    let mut uri = if trimmed.starts_with("file://") {
+        trimmed.to_string()
+    } else {
+        resolve_relative_path_to_file_uri(Path::new(trimmed))?
+    };
+    if !uri.ends_with('/') {
+        uri.push('/');
+    }
+    Ok(uri)
 }
 
 fn format_path_resolution_error(
