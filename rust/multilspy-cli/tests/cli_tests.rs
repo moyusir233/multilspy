@@ -77,6 +77,20 @@ struct CliOutput {
     stderr: String,
 }
 
+struct TestEndLog(&'static str);
+
+impl TestEndLog {
+    fn new(name: &'static str) -> Self {
+        Self(name)
+    }
+}
+
+impl Drop for TestEndLog {
+    fn drop(&mut self) {
+        println!("test_end: {}", self.0);
+    }
+}
+
 fn run_cli(args: &[&str]) -> CliOutput {
     let ws = workspace_args();
     let mut cmd = Command::new(cli_binary_path());
@@ -137,7 +151,10 @@ fn run_cli_in_dir(args: &[&str], cwd: &std::path::Path) -> CliOutput {
 }
 
 fn parse_ipc_response(stdout: &str) -> Value {
-    serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON IpcResponse")
+    serde_json::from_str(stdout.trim()).expect(&format!(
+        "stdout should be valid JSON IpcResponse: {}",
+        stdout
+    ))
 }
 
 fn assert_success_result(stdout: &str) -> Value {
@@ -254,6 +271,8 @@ fn run_in_parallel(tests: &[TestFn]) {
 // ---------------------------------------------------------------------------
 
 fn test_help_flag() {
+    println!("test_help_flag");
+    let _test_end_log = TestEndLog::new("test_help_flag");
     let out = run_cli_raw(&["--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("LSP CLI for AI agents"));
@@ -281,12 +300,16 @@ fn test_help_flag() {
 }
 
 fn test_version_flag() {
+    println!("test_version_flag");
+    let _test_end_log = TestEndLog::new("test_version_flag");
     let out = run_cli_raw(&["--version"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("multilspy"));
 }
 
 fn test_subcommand_help_definition() {
+    println!("test_subcommand_help_definition");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_definition");
     let out = run_cli_raw(&["definition", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--uri"));
@@ -299,12 +322,16 @@ fn test_subcommand_help_definition() {
 }
 
 fn test_subcommand_help_references() {
+    println!("test_subcommand_help_references");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_references");
     let out = run_cli_raw(&["references", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--include-declaration"));
 }
 
 fn test_subcommand_help_workspace_symbols() {
+    println!("test_subcommand_help_workspace_symbols");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_workspace_symbols");
     let out = run_cli_raw(&["workspace-symbols", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--query"));
@@ -316,6 +343,8 @@ fn test_subcommand_help_workspace_symbols() {
 }
 
 fn test_subcommand_help_workspace_symbol_resolve() {
+    println!("test_subcommand_help_workspace_symbol_resolve");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_workspace_symbol_resolve");
     let out = run_cli_raw(&["workspace-symbol-resolve", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--symbol-json"));
@@ -324,6 +353,8 @@ fn test_subcommand_help_workspace_symbol_resolve() {
 }
 
 fn test_subcommand_help_incoming_calls_recursive() {
+    println!("test_subcommand_help_incoming_calls_recursive");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_incoming_calls_recursive");
     let out = run_cli_raw(&["incoming-calls-recursive", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--max-depth"));
@@ -335,6 +366,8 @@ fn test_subcommand_help_incoming_calls_recursive() {
 }
 
 fn test_subcommand_help_status() {
+    println!("test_subcommand_help_status");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_status");
     let out = run_cli_raw(&["status", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("RA_LSP_INIT_PARAMS_PATH"));
@@ -347,9 +380,12 @@ fn test_subcommand_help_status() {
 }
 
 fn test_subcommand_help_analyze_trait_impl_deps_graph() {
+    println!("test_subcommand_help_analyze_trait_impl_deps_graph");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_analyze_trait_impl_deps_graph");
     let out = run_cli_raw(&["analyze-trait-impl-deps-graph", "--help"]);
     assert!(out.status.success());
-    assert!(out.stdout.contains("TRAIT... TARGET_DIR"));
+    assert!(out.stdout.contains("--target-dir"));
+    assert!(out.stdout.contains("Deprecated format is rejected"));
     assert!(out.stdout.contains("JSON Output"));
 }
 
@@ -358,6 +394,8 @@ fn test_subcommand_help_analyze_trait_impl_deps_graph() {
 // ---------------------------------------------------------------------------
 
 fn test_missing_subcommand_shows_help() {
+    println!("test_missing_subcommand_shows_help");
+    let _test_end_log = TestEndLog::new("test_missing_subcommand_shows_help");
     let out = run_cli_raw(&[]);
     assert!(!out.status.success());
     assert!(
@@ -367,35 +405,69 @@ fn test_missing_subcommand_shows_help() {
 }
 
 fn test_definition_missing_uri() {
+    println!("test_definition_missing_uri");
+    let _test_end_log = TestEndLog::new("test_definition_missing_uri");
     let out = run_cli_raw(&["definition", "--line", "0", "--character", "0"]);
     assert!(!out.status.success());
 }
 
 fn test_definition_missing_line() {
+    println!("test_definition_missing_line");
+    let _test_end_log = TestEndLog::new("test_definition_missing_line");
     let out = run_cli_raw(&["definition", "--uri", "file:///test.rs", "--character", "0"]);
     assert!(!out.status.success());
 }
 
 fn test_definition_missing_character() {
+    println!("test_definition_missing_character");
+    let _test_end_log = TestEndLog::new("test_definition_missing_character");
     let out = run_cli_raw(&["definition", "--uri", "file:///test.rs", "--line", "0"]);
     assert!(!out.status.success());
 }
 
 fn test_unknown_subcommand() {
+    println!("test_unknown_subcommand");
+    let _test_end_log = TestEndLog::new("test_unknown_subcommand");
     let out = run_cli_raw(&["nonexistent-command"]);
     assert!(!out.status.success());
 }
 
 fn test_analyze_trait_impl_deps_graph_missing_target_dir() {
-    let out = run_cli_raw(&["analyze-trait-impl-deps-graph", "Greeter"]);
+    println!("test_analyze_trait_impl_deps_graph_missing_target_dir");
+    let _test_end_log = TestEndLog::new("test_analyze_trait_impl_deps_graph_missing_target_dir");
+    let out = run_cli(&["analyze-trait-impl-deps-graph", "Greeter"]);
     assert!(!out.status.success());
     assert!(
-        out.stderr.contains("Usage") || out.stdout.contains("Usage"),
-        "should show usage info"
+        out.stderr.contains("--target-dir") || out.stdout.contains("--target-dir"),
+        "should show usage info or a clear invalid-params error"
+    );
+}
+
+fn test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir() {
+    println!("test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir");
+    let _test_end_log = TestEndLog::new(
+        "test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir",
+    );
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "Greeter",
+        "./src",
+        "--target-dir",
+        "./src",
+    ]);
+    assert!(!out.status.success());
+    let error = assert_error_response(&out.stdout);
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("deprecated positional target directory")
     );
 }
 
 fn test_definition_conflicting_uri_and_relative_path() {
+    println!("test_definition_conflicting_uri_and_relative_path");
+    let _test_end_log = TestEndLog::new("test_definition_conflicting_uri_and_relative_path");
     let out = run_cli_raw(&[
         "definition",
         "--uri",
@@ -413,6 +485,9 @@ fn test_definition_conflicting_uri_and_relative_path() {
 }
 
 fn test_invalid_env_initialize_params_file_returns_json_error() {
+    println!("test_invalid_env_initialize_params_file_returns_json_error");
+    let _test_end_log =
+        TestEndLog::new("test_invalid_env_initialize_params_file_returns_json_error");
     let missing_dir = unique_temp_dir("missing-init");
     let missing_path = missing_dir.join("missing.json");
     let workspace = test_project_root();
@@ -436,6 +511,9 @@ fn test_invalid_env_initialize_params_file_returns_json_error() {
 }
 
 fn test_invalid_env_initialize_params_json_returns_json_error() {
+    println!("test_invalid_env_initialize_params_json_returns_json_error");
+    let _test_end_log =
+        TestEndLog::new("test_invalid_env_initialize_params_json_returns_json_error");
     let dir = unique_temp_dir("invalid-init-json");
     let invalid_path = dir.join("invalid.json");
     std::fs::write(&invalid_path, "{invalid json").unwrap();
@@ -459,6 +537,8 @@ fn test_invalid_env_initialize_params_json_returns_json_error() {
 // ---------------------------------------------------------------------------
 
 fn test_output_is_valid_json() {
+    println!("test_output_is_valid_json");
+    let _test_end_log = TestEndLog::new("test_output_is_valid_json");
     if !rust_analyzer_available() {
         return;
     }
@@ -472,7 +552,12 @@ fn test_output_is_valid_json() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let parsed: Result<Value, _> = serde_json::from_str(out.stdout.trim());
     assert!(
         parsed.is_ok(),
@@ -482,6 +567,8 @@ fn test_output_is_valid_json() {
 }
 
 fn test_success_response_has_result_field() {
+    println!("test_success_response_has_result_field");
+    let _test_end_log = TestEndLog::new("test_success_response_has_result_field");
     if !rust_analyzer_available() {
         return;
     }
@@ -495,7 +582,12 @@ fn test_success_response_has_result_field() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let resp = parse_ipc_response(&out.stdout);
     assert!(
         resp.get("result").is_some(),
@@ -512,6 +604,8 @@ fn test_success_response_has_result_field() {
 // ---------------------------------------------------------------------------
 
 fn test_definition_of_function_call() {
+    println!("test_definition_of_function_call");
+    let _test_end_log = TestEndLog::new("test_definition_of_function_call");
     if !rust_analyzer_available() {
         return;
     }
@@ -525,7 +619,12 @@ fn test_definition_of_function_call() {
         "--character",
         "12",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().expect("result should be an array");
     assert!(!locations.is_empty(), "should return at least one location");
@@ -538,6 +637,8 @@ fn test_definition_of_function_call() {
 }
 
 fn test_definition_with_relative_path() {
+    println!("test_definition_with_relative_path");
+    let _test_end_log = TestEndLog::new("test_definition_with_relative_path");
     if !rust_analyzer_available() {
         return;
     }
@@ -554,7 +655,12 @@ fn test_definition_with_relative_path() {
         ],
         &workspace,
     );
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().expect("result should be an array");
     assert!(!locations.is_empty(), "should return at least one location");
@@ -566,6 +672,8 @@ fn test_definition_with_relative_path() {
 }
 
 fn test_definition_of_trait_method_call() {
+    println!("test_definition_of_trait_method_call");
+    let _test_end_log = TestEndLog::new("test_definition_of_trait_method_call");
     if !rust_analyzer_available() {
         return;
     }
@@ -579,7 +687,12 @@ fn test_definition_of_trait_method_call() {
         "--character",
         "6",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(!locations.is_empty());
@@ -587,6 +700,8 @@ fn test_definition_of_trait_method_call() {
 }
 
 fn test_definition_of_struct_field() {
+    println!("test_definition_of_struct_field");
+    let _test_end_log = TestEndLog::new("test_definition_of_struct_field");
     if !rust_analyzer_available() {
         return;
     }
@@ -600,7 +715,12 @@ fn test_definition_of_struct_field() {
         "--character",
         "35",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(!locations.is_empty());
@@ -608,6 +728,8 @@ fn test_definition_of_struct_field() {
 }
 
 fn test_definition_at_definition_site_points_to_self() {
+    println!("test_definition_at_definition_site_points_to_self");
+    let _test_end_log = TestEndLog::new("test_definition_at_definition_site_points_to_self");
     if !rust_analyzer_available() {
         return;
     }
@@ -621,7 +743,12 @@ fn test_definition_at_definition_site_points_to_self() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(!locations.is_empty());
@@ -633,6 +760,8 @@ fn test_definition_at_definition_site_points_to_self() {
 // ---------------------------------------------------------------------------
 
 fn test_type_definition_of_variable() {
+    println!("test_type_definition_of_variable");
+    let _test_end_log = TestEndLog::new("test_type_definition_of_variable");
     if !rust_analyzer_available() {
         return;
     }
@@ -646,7 +775,12 @@ fn test_type_definition_of_variable() {
         "--character",
         "8",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(!locations.is_empty());
@@ -655,6 +789,8 @@ fn test_type_definition_of_variable() {
 }
 
 fn test_type_definition_of_function_return() {
+    println!("test_type_definition_of_function_return");
+    let _test_end_log = TestEndLog::new("test_type_definition_of_function_return");
     if !rust_analyzer_available() {
         return;
     }
@@ -668,7 +804,12 @@ fn test_type_definition_of_function_return() {
         "--character",
         "8",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(!locations.is_empty());
@@ -679,6 +820,8 @@ fn test_type_definition_of_function_return() {
 // ---------------------------------------------------------------------------
 
 fn test_implementation_of_trait() {
+    println!("test_implementation_of_trait");
+    let _test_end_log = TestEndLog::new("test_implementation_of_trait");
     if !rust_analyzer_available() {
         return;
     }
@@ -692,7 +835,12 @@ fn test_implementation_of_trait() {
         "--character",
         "6",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(
@@ -712,6 +860,8 @@ fn test_implementation_of_trait() {
 }
 
 fn test_implementation_of_trait_method() {
+    println!("test_implementation_of_trait_method");
+    let _test_end_log = TestEndLog::new("test_implementation_of_trait_method");
     if !rust_analyzer_available() {
         return;
     }
@@ -725,7 +875,12 @@ fn test_implementation_of_trait_method() {
         "--character",
         "7",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(locations.len() >= 2);
@@ -738,6 +893,8 @@ fn test_implementation_of_trait_method() {
 }
 
 fn test_implementation_of_struct() {
+    println!("test_implementation_of_struct");
+    let _test_end_log = TestEndLog::new("test_implementation_of_struct");
     if !rust_analyzer_available() {
         return;
     }
@@ -751,7 +908,12 @@ fn test_implementation_of_struct() {
         "--character",
         "7",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(!locations.is_empty());
@@ -767,6 +929,8 @@ fn test_implementation_of_struct() {
 // ---------------------------------------------------------------------------
 
 fn test_references_include_declaration() {
+    println!("test_references_include_declaration");
+    let _test_end_log = TestEndLog::new("test_references_include_declaration");
     if !rust_analyzer_available() {
         return;
     }
@@ -782,7 +946,12 @@ fn test_references_include_declaration() {
         "--include-declaration",
         "true",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(
@@ -799,6 +968,8 @@ fn test_references_include_declaration() {
 }
 
 fn test_references_exclude_declaration() {
+    println!("test_references_exclude_declaration");
+    let _test_end_log = TestEndLog::new("test_references_exclude_declaration");
     if !rust_analyzer_available() {
         return;
     }
@@ -814,7 +985,12 @@ fn test_references_exclude_declaration() {
         "--include-declaration",
         "false",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(!locations.is_empty());
@@ -826,6 +1002,8 @@ fn test_references_exclude_declaration() {
 }
 
 fn test_references_of_trait_method() {
+    println!("test_references_of_trait_method");
+    let _test_end_log = TestEndLog::new("test_references_of_trait_method");
     if !rust_analyzer_available() {
         return;
     }
@@ -841,7 +1019,12 @@ fn test_references_of_trait_method() {
         "--include-declaration",
         "true",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(
@@ -856,12 +1039,19 @@ fn test_references_of_trait_method() {
 // ---------------------------------------------------------------------------
 
 fn test_document_symbols() {
+    println!("test_document_symbols");
+    let _test_end_log = TestEndLog::new("test_document_symbols");
     if !rust_analyzer_available() {
         return;
     }
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let symbols = result.as_array().unwrap();
     assert!(!symbols.is_empty(), "should return symbols");
@@ -883,12 +1073,19 @@ fn test_document_symbols() {
 }
 
 fn test_document_symbols_kinds() {
+    println!("test_document_symbols_kinds");
+    let _test_end_log = TestEndLog::new("test_document_symbols_kinds");
     if !rust_analyzer_available() {
         return;
     }
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let symbols = result.as_array().unwrap();
 
@@ -903,12 +1100,19 @@ fn test_document_symbols_kinds() {
 }
 
 fn test_document_symbols_children() {
+    println!("test_document_symbols_children");
+    let _test_end_log = TestEndLog::new("test_document_symbols_children");
     if !rust_analyzer_available() {
         return;
     }
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let symbols = result.as_array().unwrap();
 
@@ -931,11 +1135,18 @@ fn test_document_symbols_children() {
 // ---------------------------------------------------------------------------
 
 fn test_workspace_symbols_query() {
+    println!("test_workspace_symbols_query");
+    let _test_end_log = TestEndLog::new("test_workspace_symbols_query");
     if !rust_analyzer_available() {
         return;
     }
     let out = run_cli(&["workspace-symbols", "--query", "helper"]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let symbols = result.as_array().expect("result should be an array");
     assert!(!symbols.is_empty(), "should return workspace symbols");
@@ -948,17 +1159,26 @@ fn test_workspace_symbols_query() {
 }
 
 fn test_workspace_symbols_limit() {
+    println!("test_workspace_symbols_limit");
+    let _test_end_log = TestEndLog::new("test_workspace_symbols_limit");
     if !rust_analyzer_available() {
         return;
     }
     let out = run_cli(&["workspace-symbols", "--query", "e", "--limit", "1"]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let symbols = result.as_array().expect("result should be an array");
     assert!(symbols.len() <= 1, "limit should cap result length");
 }
 
 fn test_workspace_symbols_blank_query_returns_json_error() {
+    println!("test_workspace_symbols_blank_query_returns_json_error");
+    let _test_end_log = TestEndLog::new("test_workspace_symbols_blank_query_returns_json_error");
     if !rust_analyzer_available() {
         return;
     }
@@ -974,6 +1194,8 @@ fn test_workspace_symbols_blank_query_returns_json_error() {
 }
 
 fn test_workspace_symbol_resolve() {
+    println!("test_workspace_symbol_resolve");
+    let _test_end_log = TestEndLog::new("test_workspace_symbol_resolve");
     if !rust_analyzer_available() {
         return;
     }
@@ -1017,6 +1239,8 @@ fn test_workspace_symbol_resolve() {
 // ---------------------------------------------------------------------------
 
 fn test_incoming_calls() {
+    println!("test_incoming_calls");
+    let _test_end_log = TestEndLog::new("test_incoming_calls");
     if !rust_analyzer_available() {
         return;
     }
@@ -1030,7 +1254,12 @@ fn test_incoming_calls() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let calls = result.as_array().unwrap();
     assert!(!calls.is_empty(), "helper should have incoming callers");
@@ -1043,6 +1272,8 @@ fn test_incoming_calls() {
 }
 
 fn test_incoming_calls_of_leaf_function() {
+    println!("test_incoming_calls_of_leaf_function");
+    let _test_end_log = TestEndLog::new("test_incoming_calls_of_leaf_function");
     if !rust_analyzer_available() {
         return;
     }
@@ -1056,7 +1287,12 @@ fn test_incoming_calls_of_leaf_function() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let calls = result.as_array().unwrap();
     assert!(calls.is_empty(), "main should have no incoming calls");
@@ -1067,6 +1303,8 @@ fn test_incoming_calls_of_leaf_function() {
 // ---------------------------------------------------------------------------
 
 fn test_outgoing_calls() {
+    println!("test_outgoing_calls");
+    let _test_end_log = TestEndLog::new("test_outgoing_calls");
     if !rust_analyzer_available() {
         return;
     }
@@ -1080,7 +1318,12 @@ fn test_outgoing_calls() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let calls = result.as_array().unwrap();
     assert!(!calls.is_empty());
@@ -1094,6 +1337,8 @@ fn test_outgoing_calls() {
 }
 
 fn test_outgoing_calls_of_leaf() {
+    println!("test_outgoing_calls_of_leaf");
+    let _test_end_log = TestEndLog::new("test_outgoing_calls_of_leaf");
     if !rust_analyzer_available() {
         return;
     }
@@ -1107,7 +1352,12 @@ fn test_outgoing_calls_of_leaf() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let calls = result.as_array().unwrap();
     assert!(
@@ -1121,6 +1371,8 @@ fn test_outgoing_calls_of_leaf() {
 // ---------------------------------------------------------------------------
 
 fn test_incoming_calls_recursive() {
+    println!("test_incoming_calls_recursive");
+    let _test_end_log = TestEndLog::new("test_incoming_calls_recursive");
     if !rust_analyzer_available() {
         return;
     }
@@ -1136,7 +1388,12 @@ fn test_incoming_calls_recursive() {
         "--max-depth",
         "10",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
@@ -1165,6 +1422,8 @@ fn test_incoming_calls_recursive() {
 }
 
 fn test_incoming_calls_recursive_with_depth_limit() {
+    println!("test_incoming_calls_recursive_with_depth_limit");
+    let _test_end_log = TestEndLog::new("test_incoming_calls_recursive_with_depth_limit");
     if !rust_analyzer_available() {
         return;
     }
@@ -1180,7 +1439,12 @@ fn test_incoming_calls_recursive_with_depth_limit() {
         "--max-depth",
         "1",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
@@ -1202,6 +1466,8 @@ fn test_incoming_calls_recursive_with_depth_limit() {
 }
 
 fn test_incoming_calls_recursive_without_max_depth() {
+    println!("test_incoming_calls_recursive_without_max_depth");
+    let _test_end_log = TestEndLog::new("test_incoming_calls_recursive_without_max_depth");
     if !rust_analyzer_available() {
         return;
     }
@@ -1215,7 +1481,12 @@ fn test_incoming_calls_recursive_without_max_depth() {
         "--character",
         "5",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
@@ -1226,6 +1497,8 @@ fn test_incoming_calls_recursive_without_max_depth() {
 // ---------------------------------------------------------------------------
 
 fn test_outgoing_calls_recursive() {
+    println!("test_outgoing_calls_recursive");
+    let _test_end_log = TestEndLog::new("test_outgoing_calls_recursive");
     if !rust_analyzer_available() {
         return;
     }
@@ -1241,7 +1514,12 @@ fn test_outgoing_calls_recursive() {
         "--max-depth",
         "10",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
@@ -1270,6 +1548,8 @@ fn test_outgoing_calls_recursive() {
 }
 
 fn test_outgoing_calls_recursive_with_depth_limit() {
+    println!("test_outgoing_calls_recursive_with_depth_limit");
+    let _test_end_log = TestEndLog::new("test_outgoing_calls_recursive_with_depth_limit");
     if !rust_analyzer_available() {
         return;
     }
@@ -1285,7 +1565,12 @@ fn test_outgoing_calls_recursive_with_depth_limit() {
         "--max-depth",
         "1",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
@@ -1319,6 +1604,9 @@ fn src_dir_uri() -> String {
 }
 
 fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
+    println!("test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error");
     if !rust_analyzer_available() {
         return;
     }
@@ -1328,6 +1616,7 @@ fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
     let out = run_cli(&[
         "analyze-trait-impl-deps-graph",
         "Greeter",
+        "--target-dir",
         &missing_dir.display().to_string(),
     ]);
     assert!(!out.status.success());
@@ -1338,6 +1627,9 @@ fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
 }
 
 fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
+    println!("test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty");
     if !rust_analyzer_available() {
         return;
     }
@@ -1345,15 +1637,24 @@ fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
     let out = run_cli(&[
         "analyze-trait-impl-deps-graph",
         "DefinitelyNotATrait",
+        "--target-dir",
         &src_dir_uri(),
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(items.is_empty());
 }
 
 fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
+    println!("test_analyze_trait_impl_deps_graph_empty_directory_returns_empty");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_trait_impl_deps_graph_empty_directory_returns_empty");
     if !rust_analyzer_available() {
         return;
     }
@@ -1368,8 +1669,18 @@ fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
             .display()
     );
 
-    let out = run_cli(&["analyze-trait-impl-deps-graph", "Greeter", &empty_uri]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "Greeter",
+        "--target-dir",
+        &empty_uri,
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(items.is_empty());
@@ -1378,24 +1689,52 @@ fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
 }
 
 fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
+    println!("test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty");
+    let _test_end_log = TestEndLog::new(
+        "test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty",
+    );
     if !rust_analyzer_available() {
         return;
     }
 
-    let out = run_cli(&["analyze-trait-impl-deps-graph", "Marker", &src_dir_uri()]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "Marker",
+        "--target-dir",
+        &src_dir_uri(),
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(items.is_empty());
 }
 
 fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set() {
+    println!("test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set");
+    let _test_end_log = TestEndLog::new(
+        "test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set",
+    );
     if !rust_analyzer_available() {
         return;
     }
 
-    let out = run_cli(&["analyze-trait-impl-deps-graph", "Chain", &src_dir_uri()]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "Chain",
+        "--target-dir",
+        &src_dir_uri(),
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
@@ -1433,6 +1772,10 @@ fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set(
 }
 
 fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field() {
+    println!("test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field");
+    let _test_end_log = TestEndLog::new(
+        "test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field",
+    );
     if !rust_analyzer_available() {
         return;
     }
@@ -1441,9 +1784,15 @@ fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field()
         "analyze-trait-impl-deps-graph",
         "Greeter",
         "Chain",
+        "--target-dir",
         &src_dir_uri(),
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
@@ -1451,16 +1800,51 @@ fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field()
     assert!(items.iter().any(|i| i["trait_name"] == json!("Chain")));
 }
 
+fn test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union() {
+    println!("test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union");
+    if !rust_analyzer_available() {
+        return;
+    }
+
+    let out = run_cli(&[
+        "analyze-trait-impl-deps-graph",
+        "Chain",
+        "--target-dir",
+        &test_project_root().display().to_string(),
+        "--target-dir",
+        &test_project_root().join("src").display().to_string(),
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(items.iter().any(|item| item["function_name"] == json!("a")));
+    assert!(items.iter().any(|item| item["function_name"] == json!("b")));
+}
+
 // ---------------------------------------------------------------------------
 // Daemon lifecycle: status, stop, auto-spawn — EXCLUSIVE daemon lock
 // ---------------------------------------------------------------------------
 
 fn test_status_command() {
+    println!("test_status_command");
+    let _test_end_log = TestEndLog::new("test_status_command");
     if !rust_analyzer_available() {
         return;
     }
     let out = run_cli(&["status"]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     assert!(
         result.get("workspace").is_some(),
@@ -1475,6 +1859,8 @@ fn test_status_command() {
 }
 
 fn test_subsequent_command_faster_than_first() {
+    println!("test_subsequent_command_faster_than_first");
+    let _test_end_log = TestEndLog::new("test_subsequent_command_faster_than_first");
     if !rust_analyzer_available() {
         return;
     }
@@ -1519,6 +1905,8 @@ fn test_subsequent_command_faster_than_first() {
 // ---------------------------------------------------------------------------
 
 fn test_definition_at_whitespace_returns_empty() {
+    println!("test_definition_at_whitespace_returns_empty");
+    let _test_end_log = TestEndLog::new("test_definition_at_whitespace_returns_empty");
     if !rust_analyzer_available() {
         return;
     }
@@ -1532,7 +1920,12 @@ fn test_definition_at_whitespace_returns_empty() {
         "--character",
         "0",
     ]);
-    assert!(out.status.success(), "stderr: {}", out.stderr);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
     let result = assert_success_result(&out.stdout);
     let locations = result.as_array().unwrap();
     assert!(
@@ -1542,6 +1935,8 @@ fn test_definition_at_whitespace_returns_empty() {
 }
 
 fn test_definition_out_of_range_position() {
+    println!("test_definition_out_of_range_position");
+    let _test_end_log = TestEndLog::new("test_definition_out_of_range_position");
     if !rust_analyzer_available() {
         return;
     }
@@ -1563,6 +1958,8 @@ fn test_definition_out_of_range_position() {
 }
 
 fn test_definition_with_invalid_uri() {
+    println!("test_definition_with_invalid_uri");
+    let _test_end_log = TestEndLog::new("test_definition_with_invalid_uri");
     if !rust_analyzer_available() {
         return;
     }
@@ -1583,6 +1980,8 @@ fn test_definition_with_invalid_uri() {
 }
 
 fn test_document_symbols_with_invalid_uri() {
+    println!("test_document_symbols_with_invalid_uri");
+    let _test_end_log = TestEndLog::new("test_document_symbols_with_invalid_uri");
     if !rust_analyzer_available() {
         return;
     }
@@ -1595,6 +1994,8 @@ fn test_document_symbols_with_invalid_uri() {
 }
 
 fn test_references_on_keyword_returns_empty_or_ok() {
+    println!("test_references_on_keyword_returns_empty_or_ok");
+    let _test_end_log = TestEndLog::new("test_references_on_keyword_returns_empty_or_ok");
     if !rust_analyzer_available() {
         return;
     }
@@ -1619,6 +2020,8 @@ fn test_references_on_keyword_returns_empty_or_ok() {
 // ---------------------------------------------------------------------------
 
 fn test_multiple_commands_same_daemon() {
+    println!("test_multiple_commands_same_daemon");
+    let _test_end_log = TestEndLog::new("test_multiple_commands_same_daemon");
     if !rust_analyzer_available() {
         return;
     }
@@ -1653,6 +2056,8 @@ fn test_multiple_commands_same_daemon() {
 
 #[test]
 fn test_cli_suite() {
+    println!("test_cli_suite");
+    let _test_end_log = TestEndLog::new("test_cli_suite");
     let non_daemon_tests: &[TestFn] = &[
         test_help_flag,
         test_version_flag,
@@ -1669,6 +2074,7 @@ fn test_cli_suite() {
         test_definition_missing_character,
         test_unknown_subcommand,
         test_analyze_trait_impl_deps_graph_missing_target_dir,
+        test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir,
         test_definition_conflicting_uri_and_relative_path,
         test_invalid_env_initialize_params_file_returns_json_error,
         test_invalid_env_initialize_params_json_returns_json_error,
@@ -1727,6 +2133,7 @@ fn test_cli_suite() {
         test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty,
         test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set,
         test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field,
+        test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union,
     ];
     run_in_parallel(can_share_daemon_tests);
 

@@ -134,14 +134,15 @@ impl LSPClient {
     /// Analyzes dependency relationships between functions that implement the specified Rust
     /// traits within the given target directory.
     ///
-    /// The `target_dir_uri` must be a `file://` URI pointing at a directory. The returned value
-    /// is a JSON-ready array shape consumed by `multilspy-cli analyze-trait-impl-deps-graph`.
+    /// The `target_dir_uris` must contain one or more `file://` URIs pointing at directories.
+    /// The returned value is a JSON-ready array shape consumed by
+    /// `multilspy-cli analyze-trait-impl-deps-graph`.
     pub async fn analyze_trait_impl_deps_graph(
         &self,
         trait_names: Vec<String>,
-        target_dir_uri: String,
+        target_dir_uris: Vec<String>,
     ) -> anyhow::Result<Vec<TraitImplDepsGraphItem>> {
-        analyze_trait_impl_deps_graph_impl(self, trait_names, target_dir_uri).await
+        analyze_trait_impl_deps_graph_impl(self, trait_names, target_dir_uris).await
     }
 }
 
@@ -198,8 +199,8 @@ struct FunctionMeta {
 /// ## Phase 1: Collect the target function set
 /// 1. For each requested trait name, locate exact-match `SymbolKind::Interface` symbols.
 /// 2. Resolve symbols if the server returns URI-only locations.
-/// 3. For each trait symbol location, query implementations and keep only those inside
-///    `target_dir_uri` (prefix match on `file://.../dir/`).
+/// 3. For each trait symbol location, query implementations and keep only those inside any
+///    requested target directory (prefix match on `file://.../dir/`).
 /// 4. For each implementation file, query document symbols and map impl locations to an
 ///    `impl <Trait> for <Type>` node, then collect all `Function`/`Method` children beneath it.
 ///
@@ -218,7 +219,7 @@ struct FunctionMeta {
 async fn analyze_trait_impl_deps_graph_impl(
     client: &LSPClient,
     trait_names: Vec<String>,
-    target_dir_uri: String,
+    target_dir_uris: Vec<String>,
 ) -> anyhow::Result<Vec<TraitImplDepsGraphItem>> {
     // Normalize inputs: trim and drop empty trait names, then require at least one trait.
     let trait_names: Vec<String> = trait_names
@@ -230,8 +231,8 @@ async fn analyze_trait_impl_deps_graph_impl(
         anyhow::bail!("at least one non-empty trait name is required");
     }
 
-    // Directory filtering is performed with a normalized `file://.../dir/` prefix match.
-    let target_dir_uri_prefix = normalize_directory_uri_prefix(target_dir_uri)?;
+    // Directory filtering is performed with normalized `file://.../dir/` prefix matches.
+    let target_dir_uri_prefixes = normalize_directory_uri_prefixes(target_dir_uris)?;
 
     // Collect implementation locations grouped by document URI.
     //
@@ -276,8 +277,12 @@ async fn analyze_trait_impl_deps_graph_impl(
                 .await?;
 
             for impl_location in implementations {
-                // Restrict to the target directory to avoid pulling in external crate impls.
-                if !impl_location.uri.starts_with(&target_dir_uri_prefix) {
+                // Restrict to the requested target directories to avoid pulling in external
+                // crate impls or unrelated workspace files.
+                if !target_dir_uri_prefixes
+                    .iter()
+                    .any(|prefix| impl_location.uri.starts_with(prefix))
+                {
                     continue;
                 }
                 impl_locations_by_uri
@@ -459,20 +464,29 @@ async fn analyze_trait_impl_deps_graph_impl(
     Ok(output)
 }
 
-/// Normalizes a directory `file://` URI into a prefix suitable for `starts_with` filtering.
-fn normalize_directory_uri_prefix(target_dir_uri: String) -> anyhow::Result<String> {
-    let trimmed = target_dir_uri.trim();
-    if trimmed.is_empty() {
-        anyhow::bail!("target directory URI must not be empty");
+/// Normalizes directory `file://` URIs into prefixes suitable for `starts_with` filtering.
+fn normalize_directory_uri_prefixes(target_dir_uris: Vec<String>) -> anyhow::Result<Vec<String>> {
+    if target_dir_uris.is_empty() {
+        anyhow::bail!("at least one target directory URI must be provided");
     }
-    if !trimmed.starts_with("file://") {
-        anyhow::bail!("target directory must be a file:// URI, got '{}'", trimmed);
-    }
-    let mut prefix = trimmed.to_string();
-    if !prefix.ends_with('/') {
-        prefix.push('/');
-    }
-    Ok(prefix)
+
+    target_dir_uris
+        .into_iter()
+        .map(|target_dir_uri| {
+            let trimmed = target_dir_uri.trim();
+            if trimmed.is_empty() {
+                anyhow::bail!("target directory URI must not be empty");
+            }
+            if !trimmed.starts_with("file://") {
+                anyhow::bail!("target directory must be a file:// URI, got '{}'", trimmed);
+            }
+            let mut prefix = trimmed.to_string();
+            if !prefix.ends_with('/') {
+                prefix.push('/');
+            }
+            Ok(prefix)
+        })
+        .collect()
 }
 
 /// Builds a stable function identifier from a file URI and the start of the function's enclosing

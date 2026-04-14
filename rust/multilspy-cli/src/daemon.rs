@@ -328,7 +328,7 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
                 };
             match state
                 .client
-                .analyze_trait_impl_deps_graph(params.trait_names, params.target_dir_uri)
+                .analyze_trait_impl_deps_graph(params.trait_names, params.target_dir_uris)
                 .await
             {
                 Ok(r) => to_success(r),

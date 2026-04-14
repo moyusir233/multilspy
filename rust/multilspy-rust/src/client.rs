@@ -157,9 +157,11 @@ impl LSPClient {
         match (result, close_result) {
             (Ok(value), Ok(())) => Ok(value),
             (Err(err), Ok(())) => Err(err),
-            (Ok(_), Err(close_err)) => {
-                Err(close_err.context(format!("failed to close file after request: {}", uri)))
-            }
+            (Ok(_), Err(close_err)) => Err(anyhow::anyhow!(
+                "failed to close file after request: {}, close error: {:?}",
+                uri,
+                close_err
+            )),
             (Err(err), Err(close_err)) => Err(err.context(format!(
                 "request failed and closing file also failed for {}: {}",
                 uri, close_err
@@ -352,31 +354,21 @@ impl LSPClient {
         &self,
         item: CallHierarchyItem,
     ) -> anyhow::Result<CallHierarchyIncomingCallsResponse> {
+        let uri = item.uri.clone();
         let params = CallHierarchyIncomingCallsParams { item };
 
-        let result = self
-            .server
-            .send_request("callHierarchy/incomingCalls".to_string(), Some(params))
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let calls = serde_json::from_value(result)?;
-
-        Ok(calls)
+        self.send_text_document_request(&uri, "callHierarchy/incomingCalls", Some(params))
+            .await
     }
 
     pub async fn outgoing_calls(
         &self,
         item: CallHierarchyItem,
-    ) -> Result<CallHierarchyOutgoingCallsResponse, ServerError> {
+    ) -> anyhow::Result<CallHierarchyOutgoingCallsResponse> {
+        let uri = item.uri.clone();
         let params = CallHierarchyOutgoingCallsParams { item };
 
-        let result = self
-            .server
-            .send_request("callHierarchy/outgoingCalls".to_string(), Some(params))
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
-        let calls = serde_json::from_value(result)?;
-
-        Ok(calls)
+        self.send_text_document_request(&uri, "callHierarchy/outgoingCalls", Some(params))
+            .await
     }
 }

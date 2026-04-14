@@ -1023,7 +1023,7 @@ async fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
     let client = make_client().await;
 
     let result = client
-        .analyze_trait_impl_deps_graph(vec!["DefinitelyNotATrait".to_string()], src_dir_uri())
+        .analyze_trait_impl_deps_graph(vec!["DefinitelyNotATrait".to_string()], vec![src_dir_uri()])
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -1039,7 +1039,7 @@ async fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_ret
     let client = make_client().await;
 
     let result = client
-        .analyze_trait_impl_deps_graph(vec!["Marker".to_string()], src_dir_uri())
+        .analyze_trait_impl_deps_graph(vec!["Marker".to_string()], vec![src_dir_uri()])
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -1055,7 +1055,7 @@ async fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_targe
     let client = make_client().await;
 
     let result = client
-        .analyze_trait_impl_deps_graph(vec!["Chain".to_string()], src_dir_uri())
+        .analyze_trait_impl_deps_graph(vec!["Chain".to_string()], vec![src_dir_uri()])
         .await
         .unwrap();
     assert!(!result.is_empty());
@@ -1078,6 +1078,33 @@ async fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_targe
         chain_a.dependencies.iter().any(|d| d == &expected),
         "expected Chain::a to depend on Chain::b"
     );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+    let workspace_uri = format!(
+        "file://{}",
+        test_project_root()
+            .canonicalize()
+            .expect("workspace must exist")
+            .display()
+    );
+
+    let result = client
+        .analyze_trait_impl_deps_graph(
+            vec!["Chain".to_string()],
+            vec![workspace_uri, src_dir_uri()],
+        )
+        .await
+        .unwrap();
+    assert!(result.iter().any(|item| item.function_name == "a"));
+    assert!(result.iter().any(|item| item.function_name == "b"));
 
     client.shutdown().await.unwrap();
 }

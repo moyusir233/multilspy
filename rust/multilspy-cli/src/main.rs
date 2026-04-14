@@ -202,11 +202,13 @@ JSON Output:
 "#;
 
 const ANALYZE_TRAIT_IMPL_DEPS_GRAPH_HELP: &str = r#"Input:
-  - Pass 2+ positional args: 1+ trait names, then a target directory.
-  - Target directory can be a relative path or a full `file://` URI.
+  - Pass 1+ trait names as positional args.
+  - Pass 1+ target directories using repeated `--target-dir <DIR>`.
+  - Target directories can be relative paths or full `file://` URIs.
+  - Deprecated format is rejected: trailing positional directory args are no longer accepted.
   - Example:
-    `multilspy analyze-trait-impl-deps-graph Greeter Display ./src`
-    `multilspy analyze-trait-impl-deps-graph Greeter file:///workspace/src`
+    `multilspy analyze-trait-impl-deps-graph Greeter Display --target-dir src --target-dir tests`
+    `multilspy analyze-trait-impl-deps-graph Greeter --target-dir file:///workspace/src`
 
 JSON Output:
   - Success schema: `{ "result": TraitImplDepsGraphItem[] }`
@@ -528,8 +530,16 @@ enum Command {
         after_help = ANALYZE_TRAIT_IMPL_DEPS_GRAPH_HELP
     )]
     AnalyzeTraitImplDepsGraph {
-        #[arg(value_name = "TRAIT... TARGET_DIR", num_args = 2..)]
-        args: Vec<String>,
+        #[arg(value_name = "TRAIT", num_args = 1..)]
+        traits: Vec<String>,
+        #[arg(
+            long = "target-dir",
+            short = 'd',
+            value_name = "DIR",
+            required = true,
+            help = "Target directory path or file:// URI; repeat to analyze multiple directories"
+        )]
+        target_dirs: Vec<String>,
     },
 
     #[command(
@@ -810,19 +820,17 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
             })?,
         ),
 
-        Command::AnalyzeTraitImplDepsGraph { args } => {
-            if args.len() < 2 {
-                anyhow::bail!(
-                    "expected 2+ args: 1+ trait names followed by a target directory path or file:// URI"
-                );
-            }
-            let (trait_names, target_dir) = args.split_at(args.len() - 1);
-            let target_dir_uri = resolve_target_dir_to_file_uri(&target_dir[0])?;
+        Command::AnalyzeTraitImplDepsGraph {
+            traits,
+            target_dirs,
+        } => {
+            validate_analyze_trait_impl_deps_graph_traits(traits)?;
+            let target_dir_uris = resolve_target_dirs_to_file_uris(target_dirs)?;
             (
                 "analyze-trait-impl-deps-graph",
                 serde_json::to_value(ipc::AnalyzeTraitImplDepsGraphIpcParams {
-                    trait_names: trait_names.to_vec(),
-                    target_dir_uri,
+                    trait_names: traits.clone(),
+                    target_dir_uris,
                 })?,
             )
         }
@@ -892,6 +900,45 @@ fn resolve_target_dir_to_file_uri(input: &str) -> anyhow::Result<String> {
         uri.push('/');
     }
     Ok(uri)
+}
+
+fn resolve_target_dirs_to_file_uris(inputs: &[String]) -> anyhow::Result<Vec<String>> {
+    if inputs.is_empty() {
+        anyhow::bail!("at least one target directory is required");
+    }
+    inputs
+        .iter()
+        .map(|input| resolve_target_dir_to_file_uri(input))
+        .collect()
+}
+
+fn validate_analyze_trait_impl_deps_graph_traits(traits: &[String]) -> anyhow::Result<()> {
+    if traits.is_empty() {
+        anyhow::bail!("at least one trait name is required");
+    }
+
+    if let Some(deprecated) = traits
+        .iter()
+        .find(|item| looks_like_deprecated_target_dir(item))
+    {
+        anyhow::bail!(
+            "deprecated positional target directory '{}' detected; pass directories with --target-dir <DIR> instead",
+            deprecated
+        );
+    }
+
+    Ok(())
+}
+
+fn looks_like_deprecated_target_dir(input: &str) -> bool {
+    let trimmed = input.trim();
+    trimmed.starts_with("file://")
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.starts_with("./")
+        || trimmed.starts_with("../")
+        || trimmed.starts_with('/')
+        || trimmed.contains(std::path::MAIN_SEPARATOR)
 }
 
 fn format_path_resolution_error(
@@ -1309,6 +1356,33 @@ mod tests {
             error
                 .to_string()
                 .contains("must not be empty or whitespace-only")
+        );
+    }
+
+    #[test]
+    fn validate_analyze_trait_impl_deps_graph_traits_rejects_deprecated_positional_dir() {
+        let traits = vec!["Greeter".to_string(), "./src".to_string()];
+        let error = validate_analyze_trait_impl_deps_graph_traits(&traits).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("deprecated positional target directory")
+        );
+    }
+
+    #[test]
+    fn build_request_analyze_trait_impl_deps_graph_supports_target_dir_flag() {
+        let command = Command::AnalyzeTraitImplDepsGraph {
+            traits: vec!["Greeter".to_string()],
+            target_dirs: vec!["./src".to_string(), "./tests".to_string()],
+        };
+
+        let request = build_request(&command).unwrap();
+        assert_eq!(request.method, "analyze-trait-impl-deps-graph");
+        assert_eq!(request.params["trait_names"], json!(["Greeter"]));
+        assert_eq!(
+            request.params["target_dir_uris"].as_array().unwrap().len(),
+            2
         );
     }
 }

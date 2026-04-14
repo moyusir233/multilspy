@@ -84,7 +84,7 @@ pub struct WorkspaceSymbolResolveIpcParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzeTraitImplDepsGraphIpcParams {
     pub trait_names: Vec<String>,
-    pub target_dir_uri: String,
+    pub target_dir_uris: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
