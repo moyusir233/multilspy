@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
+use rayon::prelude::*;
 use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
@@ -185,13 +186,12 @@ fn stop_daemon() {
 }
 
 // ---------------------------------------------------------------------------
-// File-lock based test serialization
+// File-lock based suite serialization
 //
-// Read-only daemon tests (definition, references, etc.) take a SHARED lock
-// so they can run concurrently with each other while reusing the same daemon.
-//
-// Destructive tests (stop, respawn, perf benchmark) take an EXCLUSIVE lock
-// so no other test can interact with the daemon while it is being torn down.
+// The CLI integration helpers are executed by a single top-level test suite
+// that holds one EXCLUSIVE lock for the daemon-backed portion of the run.
+// This keeps one daemon alive across helper calls and guarantees shutdown when
+// the suite drops the guard.
 // ---------------------------------------------------------------------------
 
 fn daemon_test_lock_path() -> PathBuf {
@@ -201,22 +201,7 @@ fn daemon_test_lock_path() -> PathBuf {
 }
 
 struct DaemonTestGuard {
-    _file: File,
-}
-
-fn acquire_shared_daemon_lock() -> DaemonTestGuard {
-    std::fs::create_dir_all(daemon_test_lock_path().parent().unwrap()).ok();
-    let file = File::options()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(daemon_test_lock_path())
-        .expect("failed to open test lock file");
-
-    use std::os::unix::io::AsRawFd;
-    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) };
-    assert_eq!(rc, 0, "failed to acquire shared test lock");
-    DaemonTestGuard { _file: file }
+    file: Option<File>,
 }
 
 fn acquire_exclusive_daemon_lock() -> DaemonTestGuard {
@@ -231,14 +216,43 @@ fn acquire_exclusive_daemon_lock() -> DaemonTestGuard {
     use std::os::unix::io::AsRawFd;
     let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
     assert_eq!(rc, 0, "failed to acquire exclusive test lock");
-    DaemonTestGuard { _file: file }
+    DaemonTestGuard { file: Some(file) }
+}
+
+impl Drop for DaemonTestGuard {
+    fn drop(&mut self) {
+        drop(self.file.take());
+        stop_daemon();
+    }
+}
+
+type TestFn = fn();
+
+fn run_in_parallel(tests: &[TestFn]) {
+    if tests.is_empty() {
+        return;
+    }
+
+    // Cap fan-out so concurrent CLI processes do not overwhelm one daemon.
+    let num_threads = std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(4)
+        .min(tests.len());
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        .expect("failed to build rayon thread pool");
+
+    pool.install(|| {
+        tests.par_iter().for_each(|test| test());
+    });
 }
 
 // ---------------------------------------------------------------------------
 // CLI help and version — no daemon required, no lock needed
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_help_flag() {
     let out = run_cli_raw(&["--help"]);
     assert!(out.status.success());
@@ -266,14 +280,12 @@ fn test_help_flag() {
     assert!(out.stdout.contains("stop"));
 }
 
-#[test]
 fn test_version_flag() {
     let out = run_cli_raw(&["--version"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("multilspy"));
 }
 
-#[test]
 fn test_subcommand_help_definition() {
     let out = run_cli_raw(&["definition", "--help"]);
     assert!(out.status.success());
@@ -286,14 +298,12 @@ fn test_subcommand_help_definition() {
     assert!(out.stdout.contains("Location[]"));
 }
 
-#[test]
 fn test_subcommand_help_references() {
     let out = run_cli_raw(&["references", "--help"]);
     assert!(out.status.success());
     assert!(out.stdout.contains("--include-declaration"));
 }
 
-#[test]
 fn test_subcommand_help_workspace_symbols() {
     let out = run_cli_raw(&["workspace-symbols", "--help"]);
     assert!(out.status.success());
@@ -305,7 +315,6 @@ fn test_subcommand_help_workspace_symbols() {
     );
 }
 
-#[test]
 fn test_subcommand_help_workspace_symbol_resolve() {
     let out = run_cli_raw(&["workspace-symbol-resolve", "--help"]);
     assert!(out.status.success());
@@ -314,7 +323,6 @@ fn test_subcommand_help_workspace_symbol_resolve() {
     assert!(out.stdout.contains("WorkspaceSymbol | null"));
 }
 
-#[test]
 fn test_subcommand_help_incoming_calls_recursive() {
     let out = run_cli_raw(&["incoming-calls-recursive", "--help"]);
     assert!(out.status.success());
@@ -326,7 +334,6 @@ fn test_subcommand_help_incoming_calls_recursive() {
     );
 }
 
-#[test]
 fn test_subcommand_help_status() {
     let out = run_cli_raw(&["status", "--help"]);
     assert!(out.status.success());
@@ -339,7 +346,6 @@ fn test_subcommand_help_status() {
     );
 }
 
-#[test]
 fn test_subcommand_help_analyze_trait_impl_deps_graph() {
     let out = run_cli_raw(&["analyze-trait-impl-deps-graph", "--help"]);
     assert!(out.status.success());
@@ -351,7 +357,6 @@ fn test_subcommand_help_analyze_trait_impl_deps_graph() {
 // Missing / invalid argument handling — clap errors (no daemon required)
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_missing_subcommand_shows_help() {
     let out = run_cli_raw(&[]);
     assert!(!out.status.success());
@@ -361,31 +366,26 @@ fn test_missing_subcommand_shows_help() {
     );
 }
 
-#[test]
 fn test_definition_missing_uri() {
     let out = run_cli_raw(&["definition", "--line", "0", "--character", "0"]);
     assert!(!out.status.success());
 }
 
-#[test]
 fn test_definition_missing_line() {
     let out = run_cli_raw(&["definition", "--uri", "file:///test.rs", "--character", "0"]);
     assert!(!out.status.success());
 }
 
-#[test]
 fn test_definition_missing_character() {
     let out = run_cli_raw(&["definition", "--uri", "file:///test.rs", "--line", "0"]);
     assert!(!out.status.success());
 }
 
-#[test]
 fn test_unknown_subcommand() {
     let out = run_cli_raw(&["nonexistent-command"]);
     assert!(!out.status.success());
 }
 
-#[test]
 fn test_analyze_trait_impl_deps_graph_missing_target_dir() {
     let out = run_cli_raw(&["analyze-trait-impl-deps-graph", "Greeter"]);
     assert!(!out.status.success());
@@ -395,7 +395,6 @@ fn test_analyze_trait_impl_deps_graph_missing_target_dir() {
     );
 }
 
-#[test]
 fn test_definition_conflicting_uri_and_relative_path() {
     let out = run_cli_raw(&[
         "definition",
@@ -413,7 +412,6 @@ fn test_definition_conflicting_uri_and_relative_path() {
     assert!(out.stderr.contains("--uri"));
 }
 
-#[test]
 fn test_invalid_env_initialize_params_file_returns_json_error() {
     let missing_dir = unique_temp_dir("missing-init");
     let missing_path = missing_dir.join("missing.json");
@@ -437,7 +435,6 @@ fn test_invalid_env_initialize_params_file_returns_json_error() {
     std::fs::remove_dir_all(missing_dir).unwrap();
 }
 
-#[test]
 fn test_invalid_env_initialize_params_json_returns_json_error() {
     let dir = unique_temp_dir("invalid-init-json");
     let invalid_path = dir.join("invalid.json");
@@ -461,12 +458,10 @@ fn test_invalid_env_initialize_params_json_returns_json_error() {
 // JSON output structure validation — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_output_is_valid_json() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -486,12 +481,10 @@ fn test_output_is_valid_json() {
     );
 }
 
-#[test]
 fn test_success_response_has_result_field() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -518,12 +511,10 @@ fn test_success_response_has_result_field() {
 // definition command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_definition_of_function_call() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -546,12 +537,10 @@ fn test_definition_of_function_call() {
     assert_eq!(loc["range"]["start"]["line"], 24);
 }
 
-#[test]
 fn test_definition_with_relative_path() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let workspace = test_project_root();
     let out = run_cli_in_dir(
         &[
@@ -576,12 +565,10 @@ fn test_definition_with_relative_path() {
     assert_eq!(locations[0]["range"]["start"]["line"], 24);
 }
 
-#[test]
 fn test_definition_of_trait_method_call() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -599,12 +586,10 @@ fn test_definition_of_trait_method_call() {
     assert_eq!(locations[0]["range"]["start"]["line"], 1);
 }
 
-#[test]
 fn test_definition_of_struct_field() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -622,12 +607,10 @@ fn test_definition_of_struct_field() {
     assert_eq!(locations[0]["range"]["start"]["line"], 5);
 }
 
-#[test]
 fn test_definition_at_definition_site_points_to_self() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -649,12 +632,10 @@ fn test_definition_at_definition_site_points_to_self() {
 // type-definition command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_type_definition_of_variable() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "type-definition",
@@ -673,12 +654,10 @@ fn test_type_definition_of_variable() {
     assert_eq!(locations[0]["range"]["start"]["line"], 4);
 }
 
-#[test]
 fn test_type_definition_of_function_return() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "type-definition",
@@ -699,12 +678,10 @@ fn test_type_definition_of_function_return() {
 // implementation command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_implementation_of_trait() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "implementation",
@@ -734,12 +711,10 @@ fn test_implementation_of_trait() {
     );
 }
 
-#[test]
 fn test_implementation_of_trait_method() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "implementation",
@@ -762,12 +737,10 @@ fn test_implementation_of_trait_method() {
     assert!(lines.contains(&19));
 }
 
-#[test]
 fn test_implementation_of_struct() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "implementation",
@@ -793,12 +766,10 @@ fn test_implementation_of_struct() {
 // references command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_references_include_declaration() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -827,12 +798,10 @@ fn test_references_include_declaration() {
     assert!(lines.contains(&35), "should include usage at line 35");
 }
 
-#[test]
 fn test_references_exclude_declaration() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -856,12 +825,10 @@ fn test_references_exclude_declaration() {
     assert!(lines.contains(&35), "should include usage at line 35");
 }
 
-#[test]
 fn test_references_of_trait_method() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -888,12 +855,10 @@ fn test_references_of_trait_method() {
 // document-symbols command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_document_symbols() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -917,12 +882,10 @@ fn test_document_symbols() {
     assert!(names.contains(&"main"), "should contain main");
 }
 
-#[test]
 fn test_document_symbols_kinds() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -939,12 +902,10 @@ fn test_document_symbols_kinds() {
     assert_eq!(main_fn["kind"], 12, "main should be Function (12)");
 }
 
-#[test]
 fn test_document_symbols_children() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&["document-symbols", "--uri", &uri]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -969,12 +930,10 @@ fn test_document_symbols_children() {
 // workspace-symbols / workspace-symbol-resolve commands — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_workspace_symbols_query() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&["workspace-symbols", "--query", "helper"]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let result = assert_success_result(&out.stdout);
@@ -988,12 +947,10 @@ fn test_workspace_symbols_query() {
     assert_eq!(helper["kind"], json!(12));
 }
 
-#[test]
 fn test_workspace_symbols_limit() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&["workspace-symbols", "--query", "e", "--limit", "1"]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let result = assert_success_result(&out.stdout);
@@ -1001,12 +958,10 @@ fn test_workspace_symbols_limit() {
     assert!(symbols.len() <= 1, "limit should cap result length");
 }
 
-#[test]
 fn test_workspace_symbols_blank_query_returns_json_error() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&["workspace-symbols", "--query", "   "]);
     assert!(!out.status.success());
     let error = assert_error_response(&out.stdout);
@@ -1018,12 +973,10 @@ fn test_workspace_symbols_blank_query_returns_json_error() {
     );
 }
 
-#[test]
 fn test_workspace_symbol_resolve() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
 
     let search = run_cli(&["workspace-symbols", "--query", "helper"]);
     assert!(search.status.success(), "stderr: {}", search.stderr);
@@ -1063,12 +1016,10 @@ fn test_workspace_symbol_resolve() {
 // incoming-calls command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_incoming_calls() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls",
@@ -1091,12 +1042,10 @@ fn test_incoming_calls() {
     assert!(caller_names.contains(&"main"), "main should call helper");
 }
 
-#[test]
 fn test_incoming_calls_of_leaf_function() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls",
@@ -1117,12 +1066,10 @@ fn test_incoming_calls_of_leaf_function() {
 // outgoing-calls command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_outgoing_calls() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls",
@@ -1146,12 +1093,10 @@ fn test_outgoing_calls() {
     assert!(callee_names.contains(&"call_greet"));
 }
 
-#[test]
 fn test_outgoing_calls_of_leaf() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls",
@@ -1175,12 +1120,10 @@ fn test_outgoing_calls_of_leaf() {
 // incoming-calls-recursive command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_incoming_calls_recursive() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls-recursive",
@@ -1221,12 +1164,10 @@ fn test_incoming_calls_recursive() {
     );
 }
 
-#[test]
 fn test_incoming_calls_recursive_with_depth_limit() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls-recursive",
@@ -1260,12 +1201,10 @@ fn test_incoming_calls_recursive_with_depth_limit() {
     assert!(direct_callers.contains(&"helper"));
 }
 
-#[test]
 fn test_incoming_calls_recursive_without_max_depth() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "incoming-calls-recursive",
@@ -1286,12 +1225,10 @@ fn test_incoming_calls_recursive_without_max_depth() {
 // outgoing-calls-recursive command — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_outgoing_calls_recursive() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls-recursive",
@@ -1332,12 +1269,10 @@ fn test_outgoing_calls_recursive() {
     );
 }
 
-#[test]
 fn test_outgoing_calls_recursive_with_depth_limit() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "outgoing-calls-recursive",
@@ -1383,13 +1318,10 @@ fn src_dir_uri() -> String {
     format!("file://{}", src_dir.display())
 }
 
-#[test]
 fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_exclusive_daemon_lock();
-    stop_daemon();
 
     let missing_parent = unique_temp_dir("missing-analyze-dir");
     let missing_dir = missing_parent.join("does-not-exist");
@@ -1405,13 +1337,10 @@ fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
     let _ = std::fs::remove_dir_all(missing_parent);
 }
 
-#[test]
 fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_exclusive_daemon_lock();
-    stop_daemon();
 
     let out = run_cli(&[
         "analyze-trait-impl-deps-graph",
@@ -1424,13 +1353,10 @@ fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
     assert!(items.is_empty());
 }
 
-#[test]
 fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_exclusive_daemon_lock();
-    stop_daemon();
 
     let empty_dir = test_project_root().join("src").join("_empty_analyze_dir");
     std::fs::create_dir_all(&empty_dir).expect("failed to create empty directory");
@@ -1451,13 +1377,10 @@ fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
     let _ = std::fs::remove_dir_all(empty_dir);
 }
 
-#[test]
 fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_exclusive_daemon_lock();
-    stop_daemon();
 
     let out = run_cli(&["analyze-trait-impl-deps-graph", "Marker", &src_dir_uri()]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -1466,13 +1389,10 @@ fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_e
     assert!(items.is_empty());
 }
 
-#[test]
 fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_exclusive_daemon_lock();
-    stop_daemon();
 
     let out = run_cli(&["analyze-trait-impl-deps-graph", "Chain", &src_dir_uri()]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
@@ -1487,37 +1407,35 @@ fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set(
             && item["file_uri"].as_str().unwrap().ends_with("main.rs")
         {
             let name = item["function_name"].as_str().unwrap_or("");
-            if name.ends_with("::a") {
+            if name.ends_with("a") {
                 chain_a = Some(item.clone());
-            } else if name.ends_with("::b") {
+            } else if name.ends_with("b") {
                 chain_b = Some(item.clone());
             }
         }
     }
 
-    let chain_a = chain_a.expect("should include Chain::a");
-    let chain_b = chain_b.expect("should include Chain::b");
+    let chain_a = chain_a.expect("should include a");
+    let chain_b = chain_b.expect("should include b");
 
-    let b_file_uri = chain_b["file_uri"].as_str().unwrap();
-    let b_start_line = chain_b["range"]["start"]["line"].as_u64().unwrap();
-    let b_start_char = chain_b["range"]["start"]["character"].as_u64().unwrap();
-    let b_id = format!("{}#L{}:{}", b_file_uri, b_start_line, b_start_char);
+    let expected_dep = json!({
+        "trait_name": chain_b["trait_name"].as_str().unwrap(),
+        "file_uri": chain_b["file_uri"].as_str().unwrap(),
+        "function_name": chain_b["function_name"].as_str().unwrap(),
+    });
 
     let deps = chain_a["dependencies"].as_array().unwrap();
     assert!(
-        deps.iter().any(|d| d.as_str() == Some(&b_id)),
-        "expected Chain::a to depend on Chain::b (missing id: {})",
-        b_id
+        deps.iter().any(|d| d == &expected_dep),
+        "expected Chain::a to depend on Chain::b (missing dependency: {})",
+        expected_dep
     );
 }
 
-#[test]
 fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_exclusive_daemon_lock();
-    stop_daemon();
 
     let out = run_cli(&[
         "analyze-trait-impl-deps-graph",
@@ -1537,12 +1455,10 @@ fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field()
 // Daemon lifecycle: status, stop, auto-spawn — EXCLUSIVE daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_status_command() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&["status"]);
     assert!(out.status.success(), "stderr: {}", out.stderr);
     let result = assert_success_result(&out.stdout);
@@ -1558,40 +1474,10 @@ fn test_status_command() {
     );
 }
 
-#[test]
-fn test_stop_and_auto_respawn() {
-    if !rust_analyzer_available() {
-        return;
-    }
-    let _guard = acquire_exclusive_daemon_lock();
-    stop_daemon();
-
-    let uri = file_uri();
-    let out = run_cli(&[
-        "definition",
-        "--uri",
-        &uri,
-        "--line",
-        "24",
-        "--character",
-        "5",
-    ]);
-    assert!(
-        out.status.success(),
-        "daemon should auto-respawn after stop. stderr: {}",
-        out.stderr
-    );
-    let result = assert_success_result(&out.stdout);
-    let locations = result.as_array().unwrap();
-    assert!(!locations.is_empty());
-}
-
-#[test]
 fn test_subsequent_command_faster_than_first() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_exclusive_daemon_lock();
     stop_daemon();
 
     let uri = file_uri();
@@ -1632,12 +1518,10 @@ fn test_subsequent_command_faster_than_first() {
 // Edge cases — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_definition_at_whitespace_returns_empty() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -1657,12 +1541,10 @@ fn test_definition_at_whitespace_returns_empty() {
     );
 }
 
-#[test]
 fn test_definition_out_of_range_position() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "definition",
@@ -1680,12 +1562,10 @@ fn test_definition_out_of_range_position() {
     }
 }
 
-#[test]
 fn test_definition_with_invalid_uri() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&[
         "definition",
         "--uri",
@@ -1702,12 +1582,10 @@ fn test_definition_with_invalid_uri() {
     }
 }
 
-#[test]
 fn test_document_symbols_with_invalid_uri() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let out = run_cli(&["document-symbols", "--uri", "file:///nonexistent/file.rs"]);
     if out.status.success() {
         let result = assert_success_result(&out.stdout);
@@ -1716,12 +1594,10 @@ fn test_document_symbols_with_invalid_uri() {
     }
 }
 
-#[test]
 fn test_references_on_keyword_returns_empty_or_ok() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
     let out = run_cli(&[
         "references",
@@ -1742,12 +1618,10 @@ fn test_references_on_keyword_returns_empty_or_ok() {
 // Multiple sequential commands reuse daemon — shared daemon lock
 // ---------------------------------------------------------------------------
 
-#[test]
 fn test_multiple_commands_same_daemon() {
     if !rust_analyzer_available() {
         return;
     }
-    let _guard = acquire_shared_daemon_lock();
     let uri = file_uri();
 
     let out1 = run_cli(&["status"]);
@@ -1777,15 +1651,84 @@ fn test_multiple_commands_same_daemon() {
     assert_eq!(port1, port2, "same daemon port across commands");
 }
 
-// ---------------------------------------------------------------------------
-// Cleanup: stop daemon at the end to not leave it running
-// ---------------------------------------------------------------------------
-
 #[test]
-fn test_zz_cleanup_stop_daemon() {
+fn test_cli_suite() {
+    let non_daemon_tests: &[TestFn] = &[
+        test_help_flag,
+        test_version_flag,
+        test_subcommand_help_definition,
+        test_subcommand_help_references,
+        test_subcommand_help_workspace_symbols,
+        test_subcommand_help_workspace_symbol_resolve,
+        test_subcommand_help_incoming_calls_recursive,
+        test_subcommand_help_status,
+        test_subcommand_help_analyze_trait_impl_deps_graph,
+        test_missing_subcommand_shows_help,
+        test_definition_missing_uri,
+        test_definition_missing_line,
+        test_definition_missing_character,
+        test_unknown_subcommand,
+        test_analyze_trait_impl_deps_graph_missing_target_dir,
+        test_definition_conflicting_uri_and_relative_path,
+        test_invalid_env_initialize_params_file_returns_json_error,
+        test_invalid_env_initialize_params_json_returns_json_error,
+    ];
+    run_in_parallel(non_daemon_tests);
+
     if !rust_analyzer_available() {
         return;
     }
+
     let _guard = acquire_exclusive_daemon_lock();
     stop_daemon();
+    test_status_command();
+
+    let can_share_daemon_tests: &[TestFn] = &[
+        test_output_is_valid_json,
+        test_success_response_has_result_field,
+        test_definition_of_function_call,
+        test_definition_with_relative_path,
+        test_definition_of_trait_method_call,
+        test_definition_of_struct_field,
+        test_definition_at_definition_site_points_to_self,
+        test_type_definition_of_variable,
+        test_type_definition_of_function_return,
+        test_implementation_of_trait,
+        test_implementation_of_trait_method,
+        test_implementation_of_struct,
+        test_references_include_declaration,
+        test_references_exclude_declaration,
+        test_references_of_trait_method,
+        test_document_symbols,
+        test_document_symbols_kinds,
+        test_document_symbols_children,
+        test_workspace_symbols_query,
+        test_workspace_symbols_limit,
+        test_workspace_symbols_blank_query_returns_json_error,
+        test_workspace_symbol_resolve,
+        test_incoming_calls,
+        test_incoming_calls_of_leaf_function,
+        test_outgoing_calls,
+        test_outgoing_calls_of_leaf,
+        test_incoming_calls_recursive,
+        test_incoming_calls_recursive_with_depth_limit,
+        test_incoming_calls_recursive_without_max_depth,
+        test_outgoing_calls_recursive,
+        test_outgoing_calls_recursive_with_depth_limit,
+        test_definition_at_whitespace_returns_empty,
+        test_definition_out_of_range_position,
+        test_definition_with_invalid_uri,
+        test_document_symbols_with_invalid_uri,
+        test_references_on_keyword_returns_empty_or_ok,
+        test_multiple_commands_same_daemon,
+        test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error,
+        test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty,
+        test_analyze_trait_impl_deps_graph_empty_directory_returns_empty,
+        test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty,
+        test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set,
+        test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field,
+    ];
+    run_in_parallel(can_share_daemon_tests);
+
+    test_subsequent_command_faster_than_first();
 }

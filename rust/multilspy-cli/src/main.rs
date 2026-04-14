@@ -212,7 +212,7 @@ JSON Output:
   - Success schema: `{ "result": TraitImplDepsGraphItem[] }`
   - Empty matches return `{ "result": [] }`
   - Example item:
-    `{ "trait_name": "Greeter", "function_name": "impl Greeter for Person::greet", "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 12, "character": 1 } }, "dependencies": ["file:///workspace/src/main.rs#L34:0"] }`
+    `{ "trait_name": "Greeter", "function_name": "greet", "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 12, "character": 1 } }, "dependencies": [{ "trait_name": "Greeter", "file_uri": "file:///workspace/src/main.rs", "function_name": "helper" }] }`
 "#;
 
 const STATUS_HELP: &str = r#"Initialize Params:

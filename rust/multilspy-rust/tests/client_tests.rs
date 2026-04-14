@@ -1,7 +1,7 @@
 use multilspy_protocol::protocol::common::{
     WorkspaceSymbol, WorkspaceSymbolItem, WorkspaceSymbolLocation,
 };
-use multilspy_rust::{LSPClient, RustAnalyzerConfig};
+use multilspy_rust::{LSPClient, RustAnalyzerConfig, TraitImplDepsGraphDependency};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -1062,21 +1062,21 @@ async fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_targe
 
     let chain_a = result
         .iter()
-        .find(|item| item.trait_name == "Chain" && item.function_name.ends_with("::a"));
+        .find(|item| item.trait_name == "Chain" && item.function_name == "a");
     let chain_b = result
         .iter()
-        .find(|item| item.trait_name == "Chain" && item.function_name.ends_with("::b"));
+        .find(|item| item.trait_name == "Chain" && item.function_name == "b");
     let chain_a = chain_a.expect("should include Chain::a");
     let chain_b = chain_b.expect("should include Chain::b");
 
-    let b_id = format!(
-        "{}#L{}:{}",
-        chain_b.file_uri, chain_b.range.start.line, chain_b.range.start.character
-    );
+    let expected = TraitImplDepsGraphDependency {
+        trait_name: chain_b.trait_name.clone(),
+        file_uri: chain_b.file_uri.clone(),
+        function_name: chain_b.function_name.clone(),
+    };
     assert!(
-        chain_a.dependencies.iter().any(|d| d == &b_id),
-        "expected Chain::a to depend on Chain::b (missing id: {})",
-        b_id
+        chain_a.dependencies.iter().any(|d| d == &expected),
+        "expected Chain::a to depend on Chain::b"
     );
 
     client.shutdown().await.unwrap();

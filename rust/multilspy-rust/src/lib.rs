@@ -8,4 +8,4 @@ pub(crate) mod server;
 
 pub use client::LSPClient;
 pub use config::RustAnalyzerConfig;
-pub use logic::TraitImplDepsGraphItem;
+pub use logic::{TraitImplDepsGraphDependency, TraitImplDepsGraphItem};

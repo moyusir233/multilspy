@@ -157,9 +157,18 @@ pub struct TraitImplDepsGraphItem {
     pub file_uri: String,
     /// The enclosing range for the function definition.
     pub range: Range,
-    /// Function identifiers (see `function_id_from_range`) for target functions that are directly
-    /// called by this function. Only functions within the target set are included.
-    pub dependencies: Vec<String>,
+    /// Target functions that are directly called by this function.
+    ///
+    /// Each dependency is described using the callee's `trait_name`, `file_uri`, and
+    /// `function_name`, which is more stable for downstream consumers than a range-based id.
+    pub dependencies: Vec<TraitImplDepsGraphDependency>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TraitImplDepsGraphDependency {
+    pub trait_name: String,
+    pub file_uri: String,
+    pub function_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -318,12 +327,10 @@ async fn analyze_trait_impl_deps_graph_impl(
                 .collect();
 
             for node in impl_nodes {
-                let impl_signature = node.symbol.name.clone();
                 if let Some(children) = &node.symbol.children {
                     // Collect nested function/method symbols under the impl container.
                     collect_impl_functions(
                         &trait_name,
-                        &impl_signature,
                         &document_uri,
                         children,
                         &mut function_metas_by_id,
@@ -412,11 +419,25 @@ async fn analyze_trait_impl_deps_graph_impl(
 
     let mut output = Vec::with_capacity(function_metas_by_id.len());
     for meta in function_metas_by_id.values() {
-        let mut deps: Vec<String> = direct_deps
+        let mut deps: Vec<TraitImplDepsGraphDependency> = direct_deps
             .get(&meta.id)
-            .map(|set| set.iter().cloned().collect())
+            .map(|set| {
+                set.iter()
+                    .filter_map(|id| function_metas_by_id.get(id))
+                    .map(|callee| TraitImplDepsGraphDependency {
+                        trait_name: callee.trait_name.clone(),
+                        file_uri: callee.file_uri.clone(),
+                        function_name: callee.function_name.clone(),
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
-        deps.sort();
+        deps.sort_by(|a, b| {
+            a.trait_name
+                .cmp(&b.trait_name)
+                .then_with(|| a.file_uri.cmp(&b.file_uri))
+                .then_with(|| a.function_name.cmp(&b.function_name))
+        });
         output.push(TraitImplDepsGraphItem {
             trait_name: meta.trait_name.clone(),
             function_name: meta.function_name.clone(),
@@ -457,7 +478,7 @@ fn normalize_directory_uri_prefix(target_dir_uri: String) -> anyhow::Result<Stri
 /// Builds a stable function identifier from a file URI and the start of the function's enclosing
 /// range.
 ///
-/// This id is used as the dependency edge payload and the `dependencies` list entries.
+/// This id is used internally as the dependency edge payload and for set membership checks.
 fn function_id_from_range(uri: &str, range: &Range) -> String {
     format!("{}#L{}:{}", uri, range.start.line, range.start.character)
 }
@@ -571,7 +592,6 @@ fn flatten_document_symbols(symbols: &[DocumentSymbol], out: &mut Vec<DocumentSy
 /// items can report which trait query selected the function.
 fn collect_impl_functions(
     trait_name: &str,
-    impl_signature: &str,
     document_uri: &str,
     children: &[DocumentSymbol],
     out: &mut HashMap<String, FunctionMeta>,
@@ -582,7 +602,7 @@ fn collect_impl_functions(
             out.entry(id.clone()).or_insert_with(|| FunctionMeta {
                 id,
                 trait_name: trait_name.to_string(),
-                function_name: format!("{}::{}", impl_signature, child.name),
+                function_name: child.name.clone(),
                 file_uri: document_uri.to_string(),
                 range: child.range.clone(),
                 selection_range: child.selection_range.clone(),
@@ -590,7 +610,7 @@ fn collect_impl_functions(
         }
 
         if let Some(grandchildren) = &child.children {
-            collect_impl_functions(trait_name, impl_signature, document_uri, grandchildren, out);
+            collect_impl_functions(trait_name, document_uri, grandchildren, out);
         }
     }
 }
