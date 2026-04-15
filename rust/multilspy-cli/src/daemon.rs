@@ -349,7 +349,7 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
                     params.line,
                     params.character,
                     params.trait_names,
-                    params.target_dir_uri,
+                    params.target_dir_uris,
                 )
                 .await
             {

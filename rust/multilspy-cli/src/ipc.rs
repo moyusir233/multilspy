@@ -93,7 +93,7 @@ pub struct AnalyzeFnCallTraitDepsGraphIpcParams {
     pub line: u32,
     pub character: u32,
     pub trait_names: Vec<String>,
-    pub target_dir_uri: String,
+    pub target_dir_uris: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

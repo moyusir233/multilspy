@@ -222,14 +222,17 @@ const ANALYZE_FN_CALL_TRAIT_DEPS_GRAPH_HELP: &str = r#"Input:
   - `--relative-path` is not accepted for this command.
   - Pass `--line <N>` and `--character <N>` to point at the entry function location.
   - Pass 1+ trait names as positional args.
-  - Pass exactly 1 target directory using `--target-dir <DIR>`.
-  - The target directory can be a relative path or a full `file://` URI.
+  - Pass 1+ target directories using repeated `--target-dir <DIR>`.
+  - Each target directory can be a relative path or a full `file://` URI.
+  - Trait declarations and trait method implementations are resolved only inside the provided `--target-dir` set.
+  - Same-named traits outside the provided `--target-dir` set are ignored.
   - Example:
-    `multilspy analyze-fn-call-trait-deps-graph --uri file:///workspace/src/main.rs --line 10 --character 4 Greeter Chain --target-dir file:///workspace/src`
+    `multilspy analyze-fn-call-trait-deps-graph --uri file:///workspace/src/main.rs --line 10 --character 4 Greeter Chain --target-dir file:///workspace/src --target-dir file:///workspace/tests`
 
 JSON Output:
   - Success schema: `{ "result": FnCallTraitDepsGraphItem[] }`
   - Success returns exactly one entry-function item.
+  - Each dependency item contains a `dependency_id` and one representative `callStack`.
   - Example item:
     `{ "function_name": "helper", "entry_uri": "file:///workspace/src/main.rs", "entry_position": { "line": 34, "character": 3 }, "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 34, "character": 0 }, "end": { "line": 37, "character": 1 } }, "dependencies": [{ "dependency_id": "Greeter.greet", "callStack": ["helper", "Greeter.greet"] }] }`
 "#;
@@ -596,9 +599,9 @@ enum Command {
             short = 'd',
             value_name = "DIR",
             required = true,
-            help = "Target directory path or file:// URI"
+            help = "Target directory path or file:// URI; repeat to analyze multiple directories"
         )]
-        target_dir: String,
+        target_dirs: Vec<String>,
     },
 
     #[command(
@@ -899,10 +902,10 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
             line,
             character,
             traits,
-            target_dir,
+            target_dirs,
         } => {
             validate_analyze_fn_call_trait_deps_graph_traits(traits)?;
-            let target_dir_uri = resolve_target_dir_to_file_uri(target_dir)?;
+            let target_dir_uris = resolve_target_dirs_to_file_uris(target_dirs)?;
             (
                 "analyze-fn-call-trait-deps-graph",
                 serde_json::to_value(ipc::AnalyzeFnCallTraitDepsGraphIpcParams {
@@ -910,7 +913,7 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
                     line: *line,
                     character: *character,
                     trait_names: traits.clone(),
-                    target_dir_uri,
+                    target_dir_uris,
                 })?,
             )
         }
@@ -1493,7 +1496,7 @@ mod tests {
             line: 34,
             character: 3,
             traits: vec!["Greeter".to_string()],
-            target_dir: "./src".to_string(),
+            target_dirs: vec!["./src".to_string(), "./tests".to_string()],
         };
 
         let request = build_request(&command).unwrap();
@@ -1502,6 +1505,10 @@ mod tests {
         assert_eq!(request.params["line"], json!(34));
         assert_eq!(request.params["character"], json!(3));
         assert_eq!(request.params["trait_names"], json!(["Greeter"]));
+        assert_eq!(
+            request.params["target_dir_uris"].as_array().unwrap().len(),
+            2
+        );
     }
 
     #[test]

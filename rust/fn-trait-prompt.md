@@ -6,7 +6,7 @@ You are a senior Rust LSP tooling engineer with deep expertise in the multilspy 
 ## Core Task
 Implement a new CLI command `analyze-fn-call-trait-deps-graph` for the `multilspy-cli` application.
 
-This command analyzes trait-method dependencies for exactly one user-specified Rust entry function within a target directory. The entry function is provided by the user as a source location tuple: `uri + line + character`. The command must recursively traverse the entry function's outgoing call graph, allow traversal through non-trait functions, detect whether any reachable calls map to methods belonging to a user-specified trait set, and output the result in JSON format.
+This command analyzes trait-method dependencies for exactly one user-specified Rust entry function within one or more target directories. The entry function is provided by the user as a source location tuple: `uri + line + character`. The command must recursively traverse the entry function's outgoing call graph, allow traversal through non-trait functions, detect whether any reachable calls map to methods belonging to a user-specified trait set, and output the result in JSON format.
 
 The output is a single-entry dependency result, not a multi-entry function-to-function graph. The graph model still uses a directed graph internally, but the only logical node exposed in the CLI result is the resolved entry function.
 
@@ -15,10 +15,10 @@ The output is a single-entry dependency result, not a multi-entry function-to-fu
 - **Target trait set**: the set of traits explicitly provided by the user by name.
 - **Target trait method**: any method that belongs to a trait in the target trait set.
 - **Dependency ID**: a string identifier for a matched target trait method, formatted similarly to `ChatService.call_fn_name`.
-- **Target directory**: the directory scope used to filter relevant symbols and implementations. It must support both relative paths from the current working directory and full file URIs.
+- **Target directories**: one or more directory scopes used to filter relevant symbols and implementations. They must support both relative paths from the current working directory and full file URIs.
 
 ## Success Criteria
-1. The command accepts exactly one entry function location tuple (`--uri + --line + --character`), one or more trait names, and one target directory path.
+1. The command accepts exactly one entry function location tuple (`--uri + --line + --character`), one or more trait names, and one or more target directory paths.
 2. The command resolves the entry function location to exactly one function or method symbol. If the location does not resolve to a function-like symbol, it returns an error.
 3. The command resolves each trait name to exactly one trait symbol. If multiple symbols match for any trait, it returns an error.
 4. The command recursively analyzes outgoing calls reachable from the entry function.
@@ -42,7 +42,8 @@ The output is a single-entry dependency result, not a multi-entry function-to-fu
   - one entry function line
   - one entry function character
   - one or more trait names
-  - one target directory path
+  - one or more target directory paths
+- The CLI should allow repeated `--target-dir <DIR>` flags for this command.
 - The CLI must require `--uri` for the entry function file and must not use `--relative-path` for this command.
 - Convert relative directory paths to absolute file URIs as required by the existing LSP flow.
 - Return a clear error if any required argument is missing or malformed.
@@ -66,7 +67,9 @@ The output is a single-entry dependency result, not a multi-entry function-to-fu
   - `name` must exactly match the input trait name
   - matching is case-sensitive
   - `kind` must equal `11` (`SymbolKind::Interface`), which is the expected mapping for Rust traits in this workflow
-- Apply target-directory filtering where appropriate.
+- Apply target-directory filtering strictly:
+  - only trait declarations whose resolved URI is inside at least one `--target-dir` are eligible
+  - any same-named trait declarations outside all provided `--target-dir` values must be ignored
 - Resolution rules for each trait:
   - if zero matching symbols remain, return an error
   - if more than one matching symbol remains, return an error
@@ -77,13 +80,14 @@ The output is a single-entry dependency result, not a multi-entry function-to-fu
 - Reuse existing LSP capabilities only. Do not add any new LSP request methods.
 - Each target trait method must have a dependency ID represented as a string formatted similarly to `ChatService.call_fn_name`.
 - The final dependency set must be deduplicated by dependency ID.
+- Only trait method implementations whose resolved locations are inside at least one `--target-dir` are eligible for the target trait method set.
 
 ### 5. Recursive Dependency Analysis
 - Start analysis from the resolved entry function only.
 - Reuse the existing `outgoing-calls-recursive` implementation without modifying its behavior.
 - Recursive traversal is allowed to pass through non-trait functions.
 - Do not stop traversal simply because an intermediate function is not in the target trait set.
-- During traversal, record a dependency only when a reachable call maps to a target trait method from the resolved trait set.
+- During traversal, record a dependency only when a reachable call maps to a target trait method from the resolved trait set, and that matched trait method implementation is inside at least one `--target-dir`.
 - Ignore reachable calls that do not map to target trait methods.
 - Deduplicate matched dependencies in the final result.
 - For each matched dependency, preserve at least one concrete call stack from the entry function to the matched dependency target.
@@ -177,10 +181,11 @@ The output is a single-entry dependency result, not a multi-entry function-to-fu
 - Overlapping trait implementations must not produce duplicate dependency IDs.
 
 ## Quality Assurance Checklist
-- [ ] Input validation enforces exactly one entry function `--uri + --line + --character`, one or more trait names, and one target directory.
+- [ ] Input validation enforces exactly one entry function `--uri + --line + --character`, one or more trait names, and one or more target directories.
 - [ ] The CLI requires `--uri` for this command and does not accept `--relative-path` as the entry function input.
 - [ ] Entry function resolution returns an error when the location does not resolve to exactly one function-like symbol.
 - [ ] Trait resolution returns an error on zero or multiple matches.
+- [ ] Trait resolution ignores same-named trait declarations outside all provided `--target-dir` values.
 - [ ] Recursive traversal can pass through non-trait functions.
 - [ ] Only matched target trait methods are recorded in `dependencies`.
 - [ ] `dependencies` is a deduplicated dependency-object array keyed by IDs like `ChatService.call_fn_name`.

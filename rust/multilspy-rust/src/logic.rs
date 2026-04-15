@@ -196,7 +196,7 @@ impl LSPClient {
         line: u32,
         character: u32,
         trait_names: Vec<String>,
-        target_dir_uri: String,
+        target_dir_uris: Vec<String>,
     ) -> anyhow::Result<Vec<FnCallTraitDepsGraphItem>> {
         analyze_fn_call_trait_deps_graph_impl(
             self,
@@ -204,7 +204,7 @@ impl LSPClient {
             line,
             character,
             trait_names,
-            target_dir_uri,
+            target_dir_uris,
         )
         .await
     }
@@ -585,7 +585,7 @@ async fn analyze_fn_call_trait_deps_graph_impl(
     line: u32,
     character: u32,
     trait_names: Vec<String>,
-    target_dir_uri: String,
+    target_dir_uris: Vec<String>,
 ) -> anyhow::Result<Vec<FnCallTraitDepsGraphItem>> {
     let entry_uri = entry_uri.trim().to_string();
     if entry_uri.is_empty() {
@@ -607,7 +607,7 @@ async fn analyze_fn_call_trait_deps_graph_impl(
         anyhow::bail!("at least one non-empty trait name is required");
     }
 
-    let target_dir_uri_prefixes = normalize_directory_uri_prefixes(vec![target_dir_uri])?;
+    let target_dir_uri_prefixes = normalize_directory_uri_prefixes(target_dir_uris)?;
     if !target_dir_uri_prefixes
         .iter()
         .any(|prefix| entry_uri.starts_with(prefix))
@@ -629,7 +629,7 @@ async fn analyze_fn_call_trait_deps_graph_impl(
             client,
             &trait_name,
             &[SymbolKind::Interface],
-            None,
+            Some(&target_dir_uri_prefixes),
             "trait",
         )
         .await?;
