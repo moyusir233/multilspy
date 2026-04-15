@@ -336,6 +336,28 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
             }
         }
 
+        "analyze-fn-call-trait-deps-graph" => {
+            let params: AnalyzeFnCallTraitDepsGraphIpcParams =
+                match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => return IpcResponse::error(ERR_INVALID_PARAMS, e.to_string()),
+                };
+            match state
+                .client
+                .analyze_fn_call_trait_deps_graph(
+                    params.entry_uri,
+                    params.line,
+                    params.character,
+                    params.trait_names,
+                    params.target_dir_uri,
+                )
+                .await
+            {
+                Ok(r) => to_success(r),
+                Err(e) => IpcResponse::error(ERR_LSP_FAILED, e.to_string()),
+            }
+        }
+
         other => IpcResponse::error(ERR_METHOD_NOT_FOUND, format!("unknown method: {}", other)),
     }
 }

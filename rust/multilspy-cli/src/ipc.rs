@@ -88,6 +88,15 @@ pub struct AnalyzeTraitImplDepsGraphIpcParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyzeFnCallTraitDepsGraphIpcParams {
+    pub entry_uri: String,
+    pub line: u32,
+    pub character: u32,
+    pub trait_names: Vec<String>,
+    pub target_dir_uri: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub workspace: String,
     pub pid: u32,

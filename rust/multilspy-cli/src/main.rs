@@ -217,6 +217,23 @@ JSON Output:
     `{ "trait_name": "Greeter", "function_name": "greet", "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 12, "character": 1 } }, "dependencies": [{ "trait_name": "Greeter", "file_uri": "file:///workspace/src/main.rs", "function_name": "helper" }] }`
 "#;
 
+const ANALYZE_FN_CALL_TRAIT_DEPS_GRAPH_HELP: &str = r#"Input:
+  - Use `--uri <file://...>` for the entry file.
+  - `--relative-path` is not accepted for this command.
+  - Pass `--line <N>` and `--character <N>` to point at the entry function location.
+  - Pass 1+ trait names as positional args.
+  - Pass exactly 1 target directory using `--target-dir <DIR>`.
+  - The target directory can be a relative path or a full `file://` URI.
+  - Example:
+    `multilspy analyze-fn-call-trait-deps-graph --uri file:///workspace/src/main.rs --line 10 --character 4 Greeter Chain --target-dir file:///workspace/src`
+
+JSON Output:
+  - Success schema: `{ "result": FnCallTraitDepsGraphItem[] }`
+  - Success returns exactly one entry-function item.
+  - Example item:
+    `{ "function_name": "helper", "entry_uri": "file:///workspace/src/main.rs", "entry_position": { "line": 34, "character": 3 }, "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 34, "character": 0 }, "end": { "line": 37, "character": 1 } }, "dependencies": [{ "dependency_id": "Greeter.greet", "callStack": ["helper", "Greeter.greet"] }] }`
+"#;
+
 const STATUS_HELP: &str = r#"Initialize Params:
   - `RA_LSP_INIT_PARAMS_PATH` provides a base initialize params JSON file.
   - `--initialize-params` overrides matching fields from that JSON file.
@@ -278,6 +295,25 @@ impl FileUriArgs {
                 anyhow::bail!("one of --uri or --relative-path must be provided")
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Args)]
+struct UriOnlyFileArgs {
+    #[arg(long, required = true, help = "Document URI (file:///...)")]
+    uri: String,
+}
+
+impl UriOnlyFileArgs {
+    fn resolve_uri(&self) -> anyhow::Result<String> {
+        let uri = self.uri.trim();
+        if uri.is_empty() {
+            anyhow::bail!("--uri must not be empty");
+        }
+        if !uri.starts_with("file://") {
+            anyhow::bail!("--uri must be a file:// URI, got '{}'", uri);
+        }
+        Ok(uri.to_string())
     }
 }
 
@@ -540,6 +576,29 @@ enum Command {
             help = "Target directory path or file:// URI; repeat to analyze multiple directories"
         )]
         target_dirs: Vec<String>,
+    },
+
+    #[command(
+        about = "Analyze trait-method dependencies reached from one entry function",
+        after_help = ANALYZE_FN_CALL_TRAIT_DEPS_GRAPH_HELP
+    )]
+    AnalyzeFnCallTraitDepsGraph {
+        #[command(flatten)]
+        file: UriOnlyFileArgs,
+        #[arg(long, help = "Zero-based line number")]
+        line: u32,
+        #[arg(long, help = "Zero-based character offset")]
+        character: u32,
+        #[arg(value_name = "TRAIT", num_args = 1..)]
+        traits: Vec<String>,
+        #[arg(
+            long = "target-dir",
+            short = 'd',
+            value_name = "DIR",
+            required = true,
+            help = "Target directory path or file:// URI"
+        )]
+        target_dir: String,
     },
 
     #[command(
@@ -835,6 +894,27 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
             )
         }
 
+        Command::AnalyzeFnCallTraitDepsGraph {
+            file,
+            line,
+            character,
+            traits,
+            target_dir,
+        } => {
+            validate_analyze_fn_call_trait_deps_graph_traits(traits)?;
+            let target_dir_uri = resolve_target_dir_to_file_uri(target_dir)?;
+            (
+                "analyze-fn-call-trait-deps-graph",
+                serde_json::to_value(ipc::AnalyzeFnCallTraitDepsGraphIpcParams {
+                    entry_uri: file.resolve_uri()?,
+                    line: *line,
+                    character: *character,
+                    trait_names: traits.clone(),
+                    target_dir_uri,
+                })?,
+            )
+        }
+
         Command::Status => ("status", serde_json::json!(null)),
 
         Command::Stop => ("shutdown", serde_json::json!(null)),
@@ -923,6 +1003,24 @@ fn validate_analyze_trait_impl_deps_graph_traits(traits: &[String]) -> anyhow::R
     {
         anyhow::bail!(
             "deprecated positional target directory '{}' detected; pass directories with --target-dir <DIR> instead",
+            deprecated
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_analyze_fn_call_trait_deps_graph_traits(traits: &[String]) -> anyhow::Result<()> {
+    if traits.is_empty() {
+        anyhow::bail!("at least one trait name is required");
+    }
+
+    if let Some(deprecated) = traits
+        .iter()
+        .find(|item| looks_like_deprecated_target_dir(item))
+    {
+        anyhow::bail!(
+            "trait name '{}' looks like a path; pass the target directory with --target-dir <DIR> instead",
             deprecated
         );
     }
@@ -1384,5 +1482,35 @@ mod tests {
             request.params["target_dir_uris"].as_array().unwrap().len(),
             2
         );
+    }
+
+    #[test]
+    fn build_request_analyze_fn_call_trait_deps_graph_uses_position_params() {
+        let command = Command::AnalyzeFnCallTraitDepsGraph {
+            file: UriOnlyFileArgs {
+                uri: "file:///workspace/src/main.rs".to_string(),
+            },
+            line: 34,
+            character: 3,
+            traits: vec!["Greeter".to_string()],
+            target_dir: "./src".to_string(),
+        };
+
+        let request = build_request(&command).unwrap();
+        assert_eq!(request.method, "analyze-fn-call-trait-deps-graph");
+        assert_eq!(request.params["entry_uri"], json!("file:///workspace/src/main.rs"));
+        assert_eq!(request.params["line"], json!(34));
+        assert_eq!(request.params["character"], json!(3));
+        assert_eq!(request.params["trait_names"], json!(["Greeter"]));
+    }
+
+    #[test]
+    fn uri_only_file_args_rejects_non_file_uri() {
+        let error = UriOnlyFileArgs {
+            uri: "/tmp/main.rs".to_string(),
+        }
+        .resolve_uri()
+        .unwrap_err();
+        assert!(error.to_string().contains("file:// URI"));
     }
 }
