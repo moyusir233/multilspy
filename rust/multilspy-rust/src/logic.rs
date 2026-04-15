@@ -884,11 +884,65 @@ async fn resolve_exact_workspace_symbol(
         };
         anyhow::bail!("{} '{}' not found{}", entity_name, query, scope_suffix);
     }
+    if matches.len() > 1 && allowed_kinds == [SymbolKind::Interface] {
+        matches = disambiguate_trait_symbol_matches(client, matches).await?;
+    }
     if matches.len() > 1 {
         anyhow::bail!("{} '{}' resolved to multiple symbols", entity_name, query);
     }
 
     Ok(matches.remove(0))
+}
+
+async fn disambiguate_trait_symbol_matches(
+    client: &LSPClient,
+    matches: Vec<ResolvedWorkspaceSymbol>,
+) -> anyhow::Result<Vec<ResolvedWorkspaceSymbol>> {
+    let mut document_symbol_cache: HashMap<String, Vec<DocumentSymbol>> = HashMap::new();
+    let mut declaration_matches = Vec::new();
+    let mut method_bearing_matches = Vec::new();
+
+    for candidate in matches {
+        let document_symbols = get_document_symbols_cached(
+            client,
+            &candidate.location.uri,
+            &mut document_symbol_cache,
+        )
+        .await?;
+        let Some(symbol_node) = select_document_symbol_node(
+            &document_symbols,
+            &candidate.symbol.name,
+            &candidate.location.range.start,
+        ) else {
+            continue;
+        };
+        if symbol_node.kind != SymbolKind::Interface {
+            continue;
+        }
+
+        let has_methods = symbol_node
+            .children
+            .as_ref()
+            .map(|children| {
+                let mut trait_methods = Vec::new();
+                collect_function_like_symbols(children, &mut trait_methods);
+                !trait_methods.is_empty()
+            })
+            .unwrap_or(false);
+
+        if has_methods {
+            method_bearing_matches.push(candidate.clone());
+        }
+        declaration_matches.push(candidate);
+    }
+
+    if !method_bearing_matches.is_empty() {
+        return Ok(method_bearing_matches);
+    }
+    if !declaration_matches.is_empty() {
+        return Ok(declaration_matches);
+    }
+    Ok(Vec::new())
 }
 
 async fn resolve_workspace_symbol_location(
