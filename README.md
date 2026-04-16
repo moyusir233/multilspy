@@ -99,6 +99,18 @@ The file [src/multilspy/language_server.py](src/multilspy/language_server.py) pr
 pytest tests/multilspy
 ```
 
+## Rust CLI Implementation
+
+This repository also includes a high-performance Rust implementation of a LSP CLI specifically optimized for AI agent usage. The Rust CLI provides significant performance improvements over the Python library by using a persistent daemon architecture that avoids repeated language server initialization between requests.
+
+Key benefits:
+- **Persistent daemon**: The Rust Analyzer server runs in the background as a daemon, eliminating the overhead of server startup for repeated queries
+- **JSON output**: All commands return structured JSON output, making it easy to integrate with AI agents and other tools
+- **Rich feature set**: Supports all standard LSP requests (definition, references, document symbols, etc.) plus advanced features like recursive call hierarchy and function dependency graph analysis
+- **Optimized for performance**: Written in Rust with minimal overhead, providing sub-100ms response times for most queries after initial server startup
+
+The Rust implementation is located in the [`./rust`](./rust) directory, with detailed documentation available in its README.
+
 ## Use of `multilspy` in AI4Code Scenarios like Monitor-Guided Decoding
 `multilspy` provides all the features that language-server-protocol provides to IDEs like VSCode. It is useful to develop toolsets that can interface with AI systems like Large Language Models (LLM). 
 ### [Monitor-Guided Decoding](https://github.com/microsoft/monitors4codegen)
