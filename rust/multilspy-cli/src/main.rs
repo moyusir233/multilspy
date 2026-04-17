@@ -2,6 +2,7 @@ mod daemon;
 mod ipc;
 mod lifecycle;
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use clap::{Args, Parser, Subcommand};
 use ipc::{IpcRequest, IpcResponse};
 use multilspy_protocol::protocol::common::{WorkspaceSymbol, WorkspaceSymbolItem};
 use multilspy_protocol::protocol::requests::InitializeParams;
+use multilspy_rust::AnalyzeFuncDepsGraphTarget;
 use reqwest::Url;
 
 const INIT_PARAMS_ENV_VAR: &str = "RA_LSP_INIT_PARAMS_PATH";
@@ -201,20 +203,25 @@ JSON Output:
     `{ "result": [[{ "name": "main", "kind": 12, "uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 39, "character": 0 }, "end": { "line": 42, "character": 1 } }, "selectionRange": { "start": { "line": 39, "character": 3 }, "end": { "line": 39, "character": 7 } } }, [{ "to": { "name": "helper", "kind": 12, "uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 34, "character": 0 }, "end": { "line": 37, "character": 1 } }, "selectionRange": { "start": { "line": 34, "character": 3 }, "end": { "line": 34, "character": 9 } } }, "fromRanges": [{ "start": { "line": 40, "character": 4 }, "end": { "line": 40, "character": 10 } }] }]]] }`
 "#;
 
-const ANALYZE_TRAIT_IMPL_DEPS_GRAPH_HELP: &str = r#"Input:
-  - Pass 1+ trait names as positional args.
-  - Pass 1+ target directories using repeated `--target-dir <DIR>`.
-  - Target directories can be relative paths or full `file://` URIs.
-  - Deprecated format is rejected: trailing positional directory args are no longer accepted.
+const ANALYZE_FUNC_DEPS_GRAPH_HELP: &str = r#"Input:
+  - Pass 0+ regular function locations using repeated `--function-target <PATH,LINE,CHARACTER>`.
+  - Optional repeated `--function-target-extra <JSON>` entries attach custom metadata to regular function targets by index.
+  - Pass 0+ trait implementation targets using repeated `--trait-function-target <TARGET_DIR,TRAIT_NAME>`.
+  - Optional repeated `--trait-function-target-extra <JSON>` entries attach custom metadata to trait targets by index.
+  - `TARGET_DIR` can be a relative path, absolute path, or full `file://` URI.
+  - Function target paths can be relative paths, absolute paths, or `file://...` URIs.
+  - Extra metadata must be a JSON object, for example `{"ticket":"ABC-123"}`.
   - Example:
-    `multilspy analyze-trait-impl-deps-graph Greeter Display --target-dir src --target-dir tests`
-    `multilspy analyze-trait-impl-deps-graph Greeter --target-dir file:///workspace/src`
+    `multilspy analyze-func-deps-graph --function-target src/main.rs,35,0`
+    `multilspy analyze-func-deps-graph --function-target src/main.rs,35,0 --function-target-extra '{"ticket":"ABC-123"}'`
+    `multilspy analyze-func-deps-graph --trait-function-target src,Chain --trait-function-target-extra '{"label":"core"}'`
+    `multilspy analyze-func-deps-graph --trait-function-target file:///workspace/src,Chain --function-target src/main.rs,35,0`
 
 JSON Output:
-  - Success schema: `{ "result": TraitImplDepsGraphItem[] }`
+  - Success schema: `{ "result": AnalyzeFuncDepsGraphItem[] }`
   - Empty matches return `{ "result": [] }`
   - Example item:
-    `{ "trait_name": "Greeter", "function_name": "greet", "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 12, "character": 1 } }, "dependencies": [{ "trait_name": "Greeter", "file_uri": "file:///workspace/src/main.rs", "function_name": "helper" }] }`
+    `{ "fn_type": "trait_impl", "extra": { "trait_name": "Greeter", "label": "core" }, "function_name": "greet", "file_uri": "file:///workspace/src/main.rs", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 12, "character": 1 } }, "dependencies": [{ "fn_type": "regular_function", "file_uri": "file:///workspace/src/main.rs", "function_name": "helper", "range": { "start": { "line": 35, "character": 0 }, "end": { "line": 37, "character": 1 } } }] }`
 "#;
 
 const STATUS_HELP: &str = r#"Initialize Params:
@@ -527,19 +534,33 @@ enum Command {
 
     #[command(
         about = "Analyze dependencies between functions implementing specified traits",
-        after_help = ANALYZE_TRAIT_IMPL_DEPS_GRAPH_HELP
+        after_help = ANALYZE_FUNC_DEPS_GRAPH_HELP
     )]
-    AnalyzeTraitImplDepsGraph {
-        #[arg(value_name = "TRAIT", num_args = 1..)]
-        traits: Vec<String>,
+    AnalyzeFuncDepsGraph {
         #[arg(
-            long = "target-dir",
-            short = 'd',
-            value_name = "DIR",
-            required = true,
-            help = "Target directory path or file:// URI; repeat to analyze multiple directories"
+            long = "function-target",
+            value_name = "PATH,LINE,CHARACTER",
+            help = "Regular function target location; repeat to analyze multiple functions"
         )]
-        target_dirs: Vec<String>,
+        function_targets: Vec<String>,
+        #[arg(
+            long = "function-target-extra",
+            value_name = "JSON",
+            help = "JSON object metadata for the corresponding --function-target entry; repeat in the same order"
+        )]
+        function_target_extras: Vec<String>,
+        #[arg(
+            long = "trait-function-target",
+            value_name = "TARGET_DIR,TRAIT_NAME",
+            help = "Trait impl function target location; repeat to analyze multiple trait impl functions"
+        )]
+        trait_function_targets: Vec<String>,
+        #[arg(
+            long = "trait-function-target-extra",
+            value_name = "JSON",
+            help = "JSON object metadata for the corresponding --trait-function-target entry; repeat in the same order"
+        )]
+        trait_function_target_extras: Vec<String>,
     },
 
     #[command(
@@ -820,18 +841,27 @@ fn build_request(cmd: &Command) -> anyhow::Result<IpcRequest> {
             })?,
         ),
 
-        Command::AnalyzeTraitImplDepsGraph {
-            traits,
-            target_dirs,
+        Command::AnalyzeFuncDepsGraph {
+            function_targets,
+            function_target_extras,
+            trait_function_targets,
+            trait_function_target_extras,
         } => {
-            validate_analyze_trait_impl_deps_graph_traits(traits)?;
-            let target_dir_uris = resolve_target_dirs_to_file_uris(target_dirs)?;
+            validate_analyze_func_deps_graph_inputs(
+                function_targets,
+                function_target_extras,
+                trait_function_targets,
+                trait_function_target_extras,
+            )?;
+            let mut targets =
+                resolve_trait_function_targets(trait_function_targets, trait_function_target_extras)?;
+            targets.extend(resolve_function_targets(
+                function_targets,
+                function_target_extras,
+            )?);
             (
-                "analyze-trait-impl-deps-graph",
-                serde_json::to_value(ipc::AnalyzeTraitImplDepsGraphIpcParams {
-                    trait_names: traits.clone(),
-                    target_dir_uris,
-                })?,
+                "analyze-func-deps-graph",
+                serde_json::to_value(ipc::AnalyzeFuncDepsGraphIpcParams { targets })?,
             )
         }
 
@@ -902,43 +932,227 @@ fn resolve_target_dir_to_file_uri(input: &str) -> anyhow::Result<String> {
     Ok(uri)
 }
 
-fn resolve_target_dirs_to_file_uris(inputs: &[String]) -> anyhow::Result<Vec<String>> {
-    if inputs.is_empty() {
-        anyhow::bail!("at least one target directory is required");
+fn resolve_file_input_to_file_uri(input: &str) -> anyhow::Result<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("file path must not be empty");
     }
-    inputs
-        .iter()
-        .map(|input| resolve_target_dir_to_file_uri(input))
-        .collect()
+    if trimmed.starts_with("file://") {
+        validate_file_uri_is_existing_file(trimmed)?;
+        return Ok(trimmed.to_string());
+    }
+    resolve_relative_path_to_file_uri(Path::new(trimmed))
 }
 
-fn validate_analyze_trait_impl_deps_graph_traits(traits: &[String]) -> anyhow::Result<()> {
-    if traits.is_empty() {
-        anyhow::bail!("at least one trait name is required");
+fn resolve_function_targets(
+    inputs: &[String],
+    extras: &[String],
+) -> anyhow::Result<Vec<AnalyzeFuncDepsGraphTarget>> {
+    let mut targets = Vec::with_capacity(inputs.len());
+    for (index, input) in inputs.iter().enumerate() {
+        let target = parse_function_target(input)?;
+        let extra = extras
+            .get(index)
+            .map(|raw| parse_extra_metadata(raw))
+            .transpose()?
+            .unwrap_or_default();
+        targets.push(apply_target_extra(target, extra));
+    }
+    Ok(targets)
+}
+
+fn resolve_trait_function_targets(
+    inputs: &[String],
+    extras: &[String],
+) -> anyhow::Result<Vec<AnalyzeFuncDepsGraphTarget>> {
+    let mut targets = Vec::with_capacity(inputs.len());
+    for (index, input) in inputs.iter().enumerate() {
+        let target = parse_trait_function_target(input)?;
+        let extra = extras
+            .get(index)
+            .map(|raw| parse_extra_metadata(raw))
+            .transpose()?
+            .unwrap_or_default();
+        targets.push(apply_target_extra(target, extra));
+    }
+    Ok(targets)
+}
+
+fn parse_function_target(input: &str) -> anyhow::Result<AnalyzeFuncDepsGraphTarget> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("function target must not be empty");
     }
 
-    if let Some(deprecated) = traits
-        .iter()
-        .find(|item| looks_like_deprecated_target_dir(item))
-    {
+    let mut parts = trimmed.rsplitn(3, ',');
+    let character_raw = parts.next();
+    let line_raw = parts.next();
+    let path_raw = parts.next();
+    let (Some(character_raw), Some(line_raw), Some(path_raw)) = (character_raw, line_raw, path_raw)
+    else {
         anyhow::bail!(
-            "deprecated positional target directory '{}' detected; pass directories with --target-dir <DIR> instead",
-            deprecated
+            "invalid function target '{}'; expected format '[path],[line],[character]'",
+            trimmed
+        );
+    };
+    let path_raw = path_raw.trim();
+    if path_raw.is_empty() {
+        anyhow::bail!(
+            "invalid function target '{}'; path segment must not be empty",
+            trimmed
         );
     }
+    let line = line_raw.trim().parse::<u32>().map_err(|error| {
+        anyhow::anyhow!(
+            "invalid function target '{}'; line '{}' is not a valid zero-based u32: {}",
+            trimmed,
+            line_raw.trim(),
+            error
+        )
+    })?;
+    let character = character_raw.trim().parse::<u32>().map_err(|error| {
+        anyhow::anyhow!(
+            "invalid function target '{}'; character '{}' is not a valid zero-based u32: {}",
+            trimmed,
+            character_raw.trim(),
+            error
+        )
+    })?;
+    Ok(AnalyzeFuncDepsGraphTarget::RegularFunction {
+        file_uri: resolve_file_input_to_file_uri(path_raw)?,
+        line,
+        character,
+        extra: HashMap::new(),
+    })
+}
 
+fn parse_trait_function_target(input: &str) -> anyhow::Result<AnalyzeFuncDepsGraphTarget> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("trait function target must not be empty");
+    }
+    let mut parts = trimmed.rsplitn(2, ',');
+    let trait_name_raw = parts.next();
+    let target_dir_raw = parts.next();
+    let (Some(trait_name_raw), Some(target_dir_raw)) = (trait_name_raw, target_dir_raw) else {
+        anyhow::bail!(
+            "invalid trait function target '{}'; expected format '[target_dir],[trait_name]'",
+            trimmed
+        );
+    };
+    let trait_name = trait_name_raw.trim();
+    if trait_name.is_empty() {
+        anyhow::bail!(
+            "invalid trait function target '{}'; trait_name segment must not be empty",
+            trimmed
+        );
+    }
+    Ok(AnalyzeFuncDepsGraphTarget::TraitImpl {
+        trait_name: trait_name.to_string(),
+        target_dir_uri: resolve_target_dir_to_file_uri(target_dir_raw.trim())?,
+        extra: HashMap::new(),
+    })
+}
+
+fn parse_extra_metadata(input: &str) -> anyhow::Result<HashMap<String, serde_json::Value>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("target extra metadata must not be empty");
+    }
+    let parsed: serde_json::Value = serde_json::from_str(trimmed).map_err(|error| {
+        anyhow::anyhow!("failed to parse target extra metadata JSON '{}': {}", trimmed, error)
+    })?;
+    let serde_json::Value::Object(map) = parsed else {
+        anyhow::bail!(
+            "target extra metadata must be a JSON object, got '{}'",
+            trimmed
+        );
+    };
+    Ok(map.into_iter().collect())
+}
+
+fn apply_target_extra(
+    target: AnalyzeFuncDepsGraphTarget,
+    extra: HashMap<String, serde_json::Value>,
+) -> AnalyzeFuncDepsGraphTarget {
+    match target {
+        AnalyzeFuncDepsGraphTarget::TraitImpl {
+            trait_name,
+            target_dir_uri,
+            extra: mut existing_extra,
+        } => {
+            existing_extra.extend(extra);
+            AnalyzeFuncDepsGraphTarget::TraitImpl {
+                trait_name,
+                target_dir_uri,
+                extra: existing_extra,
+            }
+        }
+        AnalyzeFuncDepsGraphTarget::RegularFunction {
+            file_uri,
+            line,
+            character,
+            extra: mut existing_extra,
+        } => {
+            existing_extra.extend(extra);
+            AnalyzeFuncDepsGraphTarget::RegularFunction {
+                file_uri,
+                line,
+                character,
+                extra: existing_extra,
+            }
+        }
+    }
+}
+
+fn validate_analyze_func_deps_graph_inputs(
+    function_targets: &[String],
+    function_target_extras: &[String],
+    trait_function_targets: &[String],
+    trait_function_target_extras: &[String],
+) -> anyhow::Result<()> {
+    if function_targets.is_empty() && trait_function_targets.is_empty() {
+        anyhow::bail!(
+            "at least one --function-target <PATH,LINE,CHARACTER> or --trait-function-target <TARGET_DIR,TRAIT_NAME> is required"
+        );
+    }
+    if function_targets.len() != function_target_extras.len() && !function_target_extras.is_empty() {
+        anyhow::bail!(
+            "--function-target-extra entries must match the number of --function-target entries"
+        );
+    }
+    if trait_function_targets.len() != trait_function_target_extras.len()
+        && !trait_function_target_extras.is_empty()
+    {
+        anyhow::bail!(
+            "--trait-function-target-extra entries must match the number of --trait-function-target entries"
+        );
+    }
     Ok(())
 }
 
-fn looks_like_deprecated_target_dir(input: &str) -> bool {
-    let trimmed = input.trim();
-    trimmed.starts_with("file://")
-        || trimmed == "."
-        || trimmed == ".."
-        || trimmed.starts_with("./")
-        || trimmed.starts_with("../")
-        || trimmed.starts_with('/')
-        || trimmed.contains(std::path::MAIN_SEPARATOR)
+fn validate_file_uri_is_existing_file(uri: &str) -> anyhow::Result<()> {
+    let parsed = Url::parse(uri)
+        .map_err(|error| anyhow::anyhow!("invalid file URI '{}': {}", uri, error))?;
+    if parsed.scheme() != "file" {
+        anyhow::bail!("expected a file:// URI, got '{}'", uri);
+    }
+    let path = parsed.to_file_path().map_err(|()| {
+        anyhow::anyhow!(
+            "failed to convert file URI '{}' into a valid local filesystem path",
+            uri
+        )
+    })?;
+    let metadata =
+        fs::metadata(&path).map_err(|error| format_path_resolution_error(&path, &path, error))?;
+    if !metadata.is_file() {
+        anyhow::bail!(
+            "file URI '{}' resolves to '{}' but that path is not a file",
+            uri,
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 fn format_path_resolution_error(
@@ -1360,29 +1574,123 @@ mod tests {
     }
 
     #[test]
-    fn validate_analyze_trait_impl_deps_graph_traits_rejects_deprecated_positional_dir() {
-        let traits = vec!["Greeter".to_string(), "./src".to_string()];
-        let error = validate_analyze_trait_impl_deps_graph_traits(&traits).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("deprecated positional target directory")
-        );
+    fn validate_analyze_func_deps_graph_inputs_requires_at_least_one_target() {
+        let error = validate_analyze_func_deps_graph_inputs(&[], &[], &[], &[]).unwrap_err();
+        assert!(error.to_string().contains("at least one --function-target"));
     }
 
     #[test]
-    fn build_request_analyze_trait_impl_deps_graph_supports_target_dir_flag() {
-        let command = Command::AnalyzeTraitImplDepsGraph {
-            traits: vec!["Greeter".to_string()],
-            target_dirs: vec!["./src".to_string(), "./tests".to_string()],
+    fn build_request_analyze_func_deps_graph_builds_targets_payload() {
+        let command = Command::AnalyzeFuncDepsGraph {
+            function_targets: vec!["src/main.rs,0,0".to_string()],
+            function_target_extras: vec!["{\"ticket\":\"ABC-123\"}".to_string()],
+            trait_function_targets: vec!["./src,Greeter".to_string()],
+            trait_function_target_extras: vec!["{\"label\":\"core\"}".to_string()],
         };
 
         let request = build_request(&command).unwrap();
-        assert_eq!(request.method, "analyze-trait-impl-deps-graph");
-        assert_eq!(request.params["trait_names"], json!(["Greeter"]));
-        assert_eq!(
-            request.params["target_dir_uris"].as_array().unwrap().len(),
-            2
-        );
+        assert_eq!(request.method, "analyze-func-deps-graph");
+        let targets = request.params["targets"].as_array().unwrap();
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0]["target_type"], json!("trait_impl"));
+        assert_eq!(targets[0]["trait_name"], json!("Greeter"));
+        assert_eq!(targets[0]["extra"]["label"], json!("core"));
+        assert_eq!(targets[1]["target_type"], json!("regular_function"));
+        assert_eq!(targets[1]["extra"]["ticket"], json!("ABC-123"));
+    }
+
+    #[test]
+    fn parse_function_target_supports_relative_paths() {
+        let _guard = process_lock().lock().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        let dir = unique_temp_dir("function-target-relative");
+        let file_path = dir.join("sample.rs");
+        fs::write(&file_path, "fn helper() {}\n").unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let target = parse_function_target("sample.rs,0,3").unwrap();
+        match target {
+            AnalyzeFuncDepsGraphTarget::RegularFunction {
+                file_uri,
+                line,
+                character,
+                extra,
+            } => {
+                assert!(file_uri.starts_with("file://"));
+                assert_eq!(line, 0);
+                assert_eq!(character, 3);
+                assert!(extra.is_empty());
+            }
+            other => panic!("expected regular function target, got {:?}", other),
+        }
+
+        std::env::set_current_dir(original_cwd).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validate_analyze_func_deps_graph_inputs_allows_function_only_mode() {
+        validate_analyze_func_deps_graph_inputs(
+            &["src/main.rs,0,0".to_string()],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn validate_analyze_func_deps_graph_inputs_allows_trait_only_mode() {
+        validate_analyze_func_deps_graph_inputs(
+            &[],
+            &[],
+            &["src,Greeter".to_string()],
+            &[],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn validate_analyze_func_deps_graph_inputs_rejects_mismatched_function_target_extras() {
+        let error = validate_analyze_func_deps_graph_inputs(
+            &["src/main.rs,0,0".to_string()],
+            &["{\"ticket\":\"A\"}".to_string(), "{\"ticket\":\"B\"}".to_string()],
+            &[],
+            &[],
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("--function-target-extra"));
+    }
+
+    #[test]
+    fn parse_extra_metadata_requires_json_object() {
+        let error = parse_extra_metadata("[]").unwrap_err();
+        assert!(error.to_string().contains("must be a JSON object"));
+    }
+
+    #[test]
+    fn parse_trait_function_target_supports_relative_dirs() {
+        let _guard = process_lock().lock().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        let dir = unique_temp_dir("trait-function-target-relative");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let target = parse_trait_function_target("./src,Chain").unwrap();
+        match target {
+            AnalyzeFuncDepsGraphTarget::TraitImpl {
+                trait_name,
+                target_dir_uri,
+                extra,
+            } => {
+                assert_eq!(trait_name, "Chain");
+                assert!(target_dir_uri.starts_with("file://"));
+                assert!(extra.is_empty());
+            }
+            other => panic!("expected trait_impl target, got {:?}", other),
+        }
+
+        std::env::set_current_dir(original_cwd).unwrap();
+        fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -32,13 +32,22 @@ struct LSPFileBuffer {
 pub struct LSPClient {
     server: Arc<RustAnalyzerServer>,
     open_file_buffers: Arc<DashMap<String, LSPFileBuffer>>,
+    pub(crate) project_root: PathBuf,
+    need_open_file: bool,
 }
 
 impl LSPClient {
     pub async fn new(config: RustAnalyzerConfig) -> anyhow::Result<Self> {
+        let project_root = config.project_root.clone();
+        if !project_root.is_absolute() {
+            anyhow::bail!("project root must be absolute: {}", project_root.display());
+        }
+
         Ok(Self {
+            need_open_file: config.need_open_file,
             server: RustAnalyzerServer::start_server(config).await?,
             open_file_buffers: Arc::new(DashMap::new()),
+            project_root,
         })
     }
 
@@ -48,67 +57,66 @@ impl LSPClient {
     }
 
     pub async fn open_file(&self, uri: &str) -> anyhow::Result<()> {
-        if let Some(mut entry) = self.open_file_buffers.get_mut(uri) {
-            if entry.ref_count == 0 {
-                return Err(anyhow::anyhow!(
-                    "invalid open file buffer state for {}: zero ref_count",
-                    uri
-                ));
-            }
-            entry.ref_count += 1;
-            return Ok(());
-        }
+        let mut entry = self
+            .open_file_buffers
+            .entry(uri.to_string())
+            .or_insert_with(|| LSPFileBuffer {
+                uri: String::new(),
+                contents: String::new(),
+                version: 0,
+                language_id: String::new(),
+                ref_count: 0,
+            });
 
-        let file_path = uri_to_file_path(uri)?;
-        let contents = tokio::fs::read_to_string(&file_path)
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to read file {}: {}", file_path.display(), e))?;
+        if entry.ref_count == 0 {
+            let file_path = uri_to_file_path(uri)?;
+            let contents = tokio::fs::read_to_string(&file_path).await.map_err(|e| {
+                anyhow::anyhow!("failed to read file {}: {}", file_path.display(), e)
+            })?;
 
-        let language_id = "rust".to_string();
-        let version = 0;
+            let language_id = "rust".to_string();
+            let version = 0;
 
-        let params = DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.to_string(),
-                language_id: language_id.clone(),
-                version,
-                text: contents.clone(),
-            },
-        };
+            let params = DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.to_string(),
+                    language_id: language_id.clone(),
+                    version,
+                    text: contents.clone(),
+                },
+            };
 
-        self.server
-            .send_notification("textDocument/didOpen".to_string(), Some(params))
-            .await?;
+            self.server
+                .send_notification("textDocument/didOpen".to_string(), Some(params))
+                .await?;
 
-        self.open_file_buffers.insert(
-            uri.to_string(),
-            LSPFileBuffer {
+            *entry.value_mut() = LSPFileBuffer {
                 uri: uri.to_string(),
                 contents,
                 version,
                 language_id,
                 ref_count: 1,
-            },
-        );
+            };
+        } else {
+            entry.ref_count += 1;
+        }
 
         Ok(())
     }
 
     pub async fn close_file(&self, uri: &str) -> anyhow::Result<()> {
-        let should_close = {
-            let mut entry = self
-                .open_file_buffers
-                .get_mut(uri)
-                .ok_or_else(|| anyhow::anyhow!("file not open: {}", uri))?;
-            if entry.ref_count == 0 {
-                return Err(anyhow::anyhow!(
-                    "invalid open file buffer state for {}: zero ref_count",
-                    uri
-                ));
-            }
-            entry.ref_count -= 1;
-            entry.ref_count == 0
-        };
+        let mut entry = self
+            .open_file_buffers
+            .get_mut(uri)
+            .ok_or_else(|| anyhow::anyhow!("file not open: {}", uri))?;
+        if entry.ref_count == 0 {
+            return Err(anyhow::anyhow!(
+                "invalid open file buffer state for {}: zero ref_count",
+                uri
+            ));
+        }
+        entry.ref_count -= 1;
+        let should_close = entry.ref_count == 0;
 
         if should_close {
             let params = DidCloseTextDocumentParams {
@@ -122,14 +130,13 @@ impl LSPClient {
                 .send_notification("textDocument/didClose".to_string(), Some(params))
                 .await
             {
-                if let Some(mut entry) = self.open_file_buffers.get_mut(uri) {
-                    entry.ref_count = 1;
-                }
+                entry.ref_count = 1;
 
                 return Err(anyhow::Error::from(err))
                     .context(format!("failed to send didClose notification for {}", uri));
             }
 
+            drop(entry);
             self.open_file_buffers.remove(uri);
         }
 
@@ -180,15 +187,25 @@ impl LSPClient {
         R: serde::de::DeserializeOwned,
     {
         let method = method.to_string();
-        self.with_open_file(uri, move || async move {
+
+        if self.need_open_file {
+            self.with_open_file(uri, move || async move {
+                let result = self
+                    .server
+                    .send_request(method, Some(params))
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
+                Ok(serde_json::from_value(result)?)
+            })
+            .await
+        } else {
             let result = self
                 .server
                 .send_request(method, Some(params))
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("get empty response"))?;
             Ok(serde_json::from_value(result)?)
-        })
-        .await
+        }
     }
 
     async fn server_capabilities(&self) -> anyhow::Result<ServerCapabilities> {

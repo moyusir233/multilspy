@@ -294,7 +294,7 @@ fn test_help_flag() {
     assert!(out.stdout.contains("outgoing-calls"));
     assert!(out.stdout.contains("incoming-calls-recursive"));
     assert!(out.stdout.contains("outgoing-calls-recursive"));
-    assert!(out.stdout.contains("analyze-trait-impl-deps-graph"));
+    assert!(out.stdout.contains("analyze-func-deps-graph"));
     assert!(out.stdout.contains("status"));
     assert!(out.stdout.contains("stop"));
 }
@@ -379,13 +379,13 @@ fn test_subcommand_help_status() {
     );
 }
 
-fn test_subcommand_help_analyze_trait_impl_deps_graph() {
-    println!("test_subcommand_help_analyze_trait_impl_deps_graph");
-    let _test_end_log = TestEndLog::new("test_subcommand_help_analyze_trait_impl_deps_graph");
-    let out = run_cli_raw(&["analyze-trait-impl-deps-graph", "--help"]);
+fn test_subcommand_help_analyze_func_deps_graph() {
+    println!("test_subcommand_help_analyze_func_deps_graph");
+    let _test_end_log = TestEndLog::new("test_subcommand_help_analyze_func_deps_graph");
+    let out = run_cli_raw(&["analyze-func-deps-graph", "--help"]);
     assert!(out.status.success());
-    assert!(out.stdout.contains("--target-dir"));
-    assert!(out.stdout.contains("Deprecated format is rejected"));
+    assert!(out.stdout.contains("--trait-function-target"));
+    assert!(out.stdout.contains("--function-target"));
     assert!(out.stdout.contains("JSON Output"));
 }
 
@@ -432,28 +432,26 @@ fn test_unknown_subcommand() {
     assert!(!out.status.success());
 }
 
-fn test_analyze_trait_impl_deps_graph_missing_target_dir() {
-    println!("test_analyze_trait_impl_deps_graph_missing_target_dir");
-    let _test_end_log = TestEndLog::new("test_analyze_trait_impl_deps_graph_missing_target_dir");
-    let out = run_cli(&["analyze-trait-impl-deps-graph", "Greeter"]);
+fn test_analyze_func_deps_graph_requires_at_least_one_target() {
+    println!("test_analyze_func_deps_graph_requires_at_least_one_target");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_func_deps_graph_requires_at_least_one_target");
+    let out = run_cli(&["analyze-func-deps-graph"]);
     assert!(!out.status.success());
     assert!(
-        out.stderr.contains("--target-dir") || out.stdout.contains("--target-dir"),
+        out.stdout.contains("--trait-function-target") || out.stdout.contains("--function-target"),
         "should show usage info or a clear invalid-params error"
     );
 }
 
-fn test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir() {
-    println!("test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir");
-    let _test_end_log = TestEndLog::new(
-        "test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir",
-    );
+fn test_analyze_func_deps_graph_rejects_invalid_trait_function_target() {
+    println!("test_analyze_func_deps_graph_rejects_invalid_trait_function_target");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_func_deps_graph_rejects_invalid_trait_function_target");
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
+        "analyze-func-deps-graph",
+        "--trait-function-target",
         "Greeter",
-        "./src",
-        "--target-dir",
-        "./src",
     ]);
     assert!(!out.status.success());
     let error = assert_error_response(&out.stdout);
@@ -461,7 +459,7 @@ fn test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir()
         error["message"]
             .as_str()
             .unwrap()
-            .contains("deprecated positional target directory")
+            .contains("expected format '[target_dir],[trait_name]'")
     );
 }
 
@@ -1592,7 +1590,7 @@ fn test_outgoing_calls_recursive_with_depth_limit() {
 }
 
 // ---------------------------------------------------------------------------
-// analyze-trait-impl-deps-graph command — shared daemon lock
+// analyze-func-deps-graph command — shared daemon lock
 // ---------------------------------------------------------------------------
 
 fn src_dir_uri() -> String {
@@ -1603,10 +1601,17 @@ fn src_dir_uri() -> String {
     format!("file://{}", src_dir.display())
 }
 
-fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
-    println!("test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error");
+fn main_rs_path() -> PathBuf {
+    test_project_root()
+        .join("src/main.rs")
+        .canonicalize()
+        .expect("test-rust-project/src/main.rs must exist")
+}
+
+fn test_analyze_func_deps_graph_invalid_target_dir_returns_json_error() {
+    println!("test_analyze_func_deps_graph_invalid_target_dir_returns_json_error");
     let _test_end_log =
-        TestEndLog::new("test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error");
+        TestEndLog::new("test_analyze_func_deps_graph_invalid_target_dir_returns_json_error");
     if !rust_analyzer_available() {
         return;
     }
@@ -1614,10 +1619,9 @@ fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
     let missing_parent = unique_temp_dir("missing-analyze-dir");
     let missing_dir = missing_parent.join("does-not-exist");
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
-        "Greeter",
-        "--target-dir",
-        &missing_dir.display().to_string(),
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Greeter", missing_dir.display()),
     ]);
     assert!(!out.status.success());
     let error = assert_error_response(&out.stdout);
@@ -1626,19 +1630,18 @@ fn test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error() {
     let _ = std::fs::remove_dir_all(missing_parent);
 }
 
-fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
-    println!("test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty");
+fn test_analyze_func_deps_graph_trait_not_found_returns_empty() {
+    println!("test_analyze_func_deps_graph_trait_not_found_returns_empty");
     let _test_end_log =
-        TestEndLog::new("test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty");
+        TestEndLog::new("test_analyze_func_deps_graph_trait_not_found_returns_empty");
     if !rust_analyzer_available() {
         return;
     }
 
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
-        "DefinitelyNotATrait",
-        "--target-dir",
-        &src_dir_uri(),
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},DefinitelyNotATrait", src_dir_uri()),
     ]);
     assert!(
         out.status.success(),
@@ -1651,10 +1654,10 @@ fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
     assert!(items.is_empty());
 }
 
-fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
-    println!("test_analyze_trait_impl_deps_graph_empty_directory_returns_empty");
+fn test_analyze_func_deps_graph_empty_directory_returns_empty() {
+    println!("test_analyze_func_deps_graph_empty_directory_returns_empty");
     let _test_end_log =
-        TestEndLog::new("test_analyze_trait_impl_deps_graph_empty_directory_returns_empty");
+        TestEndLog::new("test_analyze_func_deps_graph_empty_directory_returns_empty");
     if !rust_analyzer_available() {
         return;
     }
@@ -1670,10 +1673,9 @@ fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
     );
 
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
-        "Greeter",
-        "--target-dir",
-        &empty_uri,
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Greeter", empty_uri),
     ]);
     assert!(
         out.status.success(),
@@ -1688,20 +1690,19 @@ fn test_analyze_trait_impl_deps_graph_empty_directory_returns_empty() {
     let _ = std::fs::remove_dir_all(empty_dir);
 }
 
-fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
-    println!("test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty");
+fn test_analyze_func_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
+    println!("test_analyze_func_deps_graph_trait_with_impl_but_no_functions_returns_empty");
     let _test_end_log = TestEndLog::new(
-        "test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty",
+        "test_analyze_func_deps_graph_trait_with_impl_but_no_functions_returns_empty",
     );
     if !rust_analyzer_available() {
         return;
     }
 
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
-        "Marker",
-        "--target-dir",
-        &src_dir_uri(),
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Marker", src_dir_uri()),
     ]);
     assert!(
         out.status.success(),
@@ -1714,20 +1715,18 @@ fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_e
     assert!(items.is_empty());
 }
 
-fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set() {
-    println!("test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set");
-    let _test_end_log = TestEndLog::new(
-        "test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set",
-    );
+fn test_analyze_func_deps_graph_builds_dependency_edges_within_target_set() {
+    println!("test_analyze_func_deps_graph_builds_dependency_edges_within_target_set");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_func_deps_graph_builds_dependency_edges_within_target_set");
     if !rust_analyzer_available() {
         return;
     }
 
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
-        "Chain",
-        "--target-dir",
-        &src_dir_uri(),
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Chain", src_dir_uri()),
     ]);
     assert!(
         out.status.success(),
@@ -1742,7 +1741,8 @@ fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set(
     let mut chain_a = None;
     let mut chain_b = None;
     for item in items {
-        if item["trait_name"] == json!("Chain")
+        if item["fn_type"] == json!("trait_impl")
+            && item["extra"]["trait_name"] == json!("Chain")
             && item["file_uri"].as_str().unwrap().ends_with("main.rs")
         {
             let name = item["function_name"].as_str().unwrap_or("");
@@ -1758,9 +1758,10 @@ fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set(
     let chain_b = chain_b.expect("should include b");
 
     let expected_dep = json!({
-        "trait_name": chain_b["trait_name"].as_str().unwrap(),
+        "fn_type": "trait_impl",
         "file_uri": chain_b["file_uri"].as_str().unwrap(),
         "function_name": chain_b["function_name"].as_str().unwrap(),
+        "range": chain_b["range"].clone(),
     });
 
     let deps = chain_a["dependencies"].as_array().unwrap();
@@ -1771,21 +1772,20 @@ fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set(
     );
 }
 
-fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field() {
-    println!("test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field");
-    let _test_end_log = TestEndLog::new(
-        "test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field",
-    );
+fn test_analyze_func_deps_graph_multiple_traits_include_trait_metadata() {
+    println!("test_analyze_func_deps_graph_multiple_traits_include_trait_metadata");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_func_deps_graph_multiple_traits_include_trait_metadata");
     if !rust_analyzer_available() {
         return;
     }
 
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
-        "Greeter",
-        "Chain",
-        "--target-dir",
-        &src_dir_uri(),
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Greeter", src_dir_uri()),
+        "--trait-function-target",
+        &format!("{},Chain", src_dir_uri()),
     ]);
     assert!(
         out.status.success(),
@@ -1796,25 +1796,32 @@ fn test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field()
     let result = assert_success_result(&out.stdout);
     let items = result.as_array().unwrap();
     assert!(!items.is_empty());
-    assert!(items.iter().any(|i| i["trait_name"] == json!("Greeter")));
-    assert!(items.iter().any(|i| i["trait_name"] == json!("Chain")));
+    assert!(
+        items
+            .iter()
+            .any(|i| i["extra"]["trait_name"] == json!("Greeter"))
+    );
+    assert!(
+        items
+            .iter()
+            .any(|i| i["extra"]["trait_name"] == json!("Chain"))
+    );
 }
 
-fn test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union() {
-    println!("test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union");
+fn test_analyze_func_deps_graph_multiple_target_dirs_returns_union() {
+    println!("test_analyze_func_deps_graph_multiple_target_dirs_returns_union");
     let _test_end_log =
-        TestEndLog::new("test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union");
+        TestEndLog::new("test_analyze_func_deps_graph_multiple_target_dirs_returns_union");
     if !rust_analyzer_available() {
         return;
     }
 
     let out = run_cli(&[
-        "analyze-trait-impl-deps-graph",
-        "Chain",
-        "--target-dir",
-        &test_project_root().display().to_string(),
-        "--target-dir",
-        &test_project_root().join("src").display().to_string(),
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Chain", test_project_root().display()),
+        "--trait-function-target",
+        &format!("{},Chain", test_project_root().join("src").display()),
     ]);
     assert!(
         out.status.success(),
@@ -1826,6 +1833,175 @@ fn test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union() {
     let items = result.as_array().unwrap();
     assert!(items.iter().any(|item| item["function_name"] == json!("a")));
     assert!(items.iter().any(|item| item["function_name"] == json!("b")));
+}
+
+fn test_analyze_func_deps_graph_regular_function_targets_support_relative_paths() {
+    println!("test_analyze_func_deps_graph_regular_function_targets_support_relative_paths");
+    let _test_end_log = TestEndLog::new(
+        "test_analyze_func_deps_graph_regular_function_targets_support_relative_paths",
+    );
+    if !rust_analyzer_available() {
+        return;
+    }
+
+    let out = run_cli_in_dir(
+        &[
+            "analyze-func-deps-graph",
+            "--function-target",
+            "src/main.rs,34,0",
+            "--function-target",
+            "src/main.rs,24,0",
+        ],
+        &test_project_root(),
+    );
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    let helper = items
+        .iter()
+        .find(|item| {
+            item["fn_type"] == json!("regular_function") && item["function_name"] == json!("helper")
+        })
+        .expect("should include helper");
+    let deps = helper["dependencies"].as_array().unwrap();
+    assert!(deps.iter().any(|dependency| {
+        dependency["fn_type"] == json!("regular_function")
+            && dependency["function_name"] == json!("create_hello")
+            && dependency["range"]["start"]["line"] == json!(24)
+    }));
+}
+
+fn test_analyze_func_deps_graph_mixed_targets_return_generic_metadata() {
+    println!("test_analyze_func_deps_graph_mixed_targets_return_generic_metadata");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_func_deps_graph_mixed_targets_return_generic_metadata");
+    if !rust_analyzer_available() {
+        return;
+    }
+
+    let out = run_cli(&[
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Chain", src_dir_uri()),
+        "--function-target",
+        &format!("file://{},34,0", main_rs_path().display()),
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(items.iter().any(|item| {
+        item["fn_type"] == json!("trait_impl") && item["extra"]["trait_name"] == json!("Chain")
+    }));
+    assert!(items.iter().any(|item| {
+        item["fn_type"] == json!("regular_function") && item["function_name"] == json!("helper")
+    }));
+}
+
+fn test_analyze_func_deps_graph_target_extras_are_preserved() {
+    println!("test_analyze_func_deps_graph_target_extras_are_preserved");
+    let _test_end_log = TestEndLog::new("test_analyze_func_deps_graph_target_extras_are_preserved");
+    if !rust_analyzer_available() {
+        return;
+    }
+
+    let out = run_cli(&[
+        "analyze-func-deps-graph",
+        "--trait-function-target",
+        &format!("{},Chain", src_dir_uri()),
+        "--trait-function-target-extra",
+        r#"{"label":"core"}"#,
+        "--function-target",
+        &format!("file://{},34,0", main_rs_path().display()),
+        "--function-target-extra",
+        r#"{"ticket":"ABC-123"}"#,
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    assert!(items.iter().any(|item| {
+        item["fn_type"] == json!("trait_impl")
+            && item["extra"]["trait_name"] == json!("Chain")
+            && item["extra"]["label"] == json!("core")
+    }));
+    assert!(items.iter().any(|item| {
+        item["fn_type"] == json!("regular_function")
+            && item["function_name"] == json!("helper")
+            && item["extra"]["ticket"] == json!("ABC-123")
+    }));
+}
+
+fn test_analyze_func_deps_graph_multi_layer_regular_function_chain() {
+    println!("test_analyze_func_deps_graph_multi_layer_regular_function_chain");
+    let _test_end_log =
+        TestEndLog::new("test_analyze_func_deps_graph_multi_layer_regular_function_chain");
+    if !rust_analyzer_available() {
+        return;
+    }
+
+    let out = run_cli(&[
+        "analyze-func-deps-graph",
+        "--function-target",
+        &format!("file://{},39,0", main_rs_path().display()),
+        "--function-target",
+        &format!("file://{},24,0", main_rs_path().display()),
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}, stderr: {}",
+        out.stdout,
+        out.stderr
+    );
+    let result = assert_success_result(&out.stdout);
+    let items = result.as_array().unwrap();
+    let top_level = items
+        .iter()
+        .find(|item| item["function_name"] == json!("main"))
+        .expect("should include main");
+    let deps = top_level["dependencies"].as_array().unwrap();
+    assert!(
+        deps.iter()
+            .any(|dependency| dependency["function_name"] == json!("create_hello"))
+    );
+}
+
+fn test_analyze_func_deps_graph_invalid_regular_function_target_returns_json_error() {
+    println!("test_analyze_func_deps_graph_invalid_regular_function_target_returns_json_error");
+    let _test_end_log = TestEndLog::new(
+        "test_analyze_func_deps_graph_invalid_regular_function_target_returns_json_error",
+    );
+    if !rust_analyzer_available() {
+        return;
+    }
+
+    let out = run_cli(&[
+        "analyze-func-deps-graph",
+        "--function-target",
+        &format!("file://{},4,0", main_rs_path().display()),
+    ]);
+    assert!(!out.status.success());
+    let error = assert_error_response(&out.stdout);
+    assert_eq!(error["code"], json!(-32000));
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not resolve to a function or method symbol")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2067,14 +2243,14 @@ fn test_cli_suite() {
         test_subcommand_help_workspace_symbol_resolve,
         test_subcommand_help_incoming_calls_recursive,
         test_subcommand_help_status,
-        test_subcommand_help_analyze_trait_impl_deps_graph,
+        test_subcommand_help_analyze_func_deps_graph,
         test_missing_subcommand_shows_help,
         test_definition_missing_uri,
         test_definition_missing_line,
         test_definition_missing_character,
         test_unknown_subcommand,
-        test_analyze_trait_impl_deps_graph_missing_target_dir,
-        test_analyze_trait_impl_deps_graph_rejects_deprecated_positional_target_dir,
+        test_analyze_func_deps_graph_requires_at_least_one_target,
+        test_analyze_func_deps_graph_rejects_invalid_trait_function_target,
         test_definition_conflicting_uri_and_relative_path,
         test_invalid_env_initialize_params_file_returns_json_error,
         test_invalid_env_initialize_params_json_returns_json_error,
@@ -2127,15 +2303,22 @@ fn test_cli_suite() {
         test_document_symbols_with_invalid_uri,
         test_references_on_keyword_returns_empty_or_ok,
         test_multiple_commands_same_daemon,
-        test_analyze_trait_impl_deps_graph_invalid_target_dir_returns_json_error,
-        test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty,
-        test_analyze_trait_impl_deps_graph_empty_directory_returns_empty,
-        test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty,
-        test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set,
-        test_analyze_trait_impl_deps_graph_multiple_traits_include_trait_name_field,
-        test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union,
+        test_analyze_func_deps_graph_invalid_target_dir_returns_json_error,
+        test_analyze_func_deps_graph_trait_not_found_returns_empty,
+        test_analyze_func_deps_graph_empty_directory_returns_empty,
+        test_analyze_func_deps_graph_trait_with_impl_but_no_functions_returns_empty,
+        test_analyze_func_deps_graph_builds_dependency_edges_within_target_set,
+        test_analyze_func_deps_graph_multiple_traits_include_trait_metadata,
+        test_analyze_func_deps_graph_invalid_regular_function_target_returns_json_error,
+        test_analyze_func_deps_graph_multiple_target_dirs_returns_union,
+        test_analyze_func_deps_graph_regular_function_targets_support_relative_paths,
+        test_analyze_func_deps_graph_mixed_targets_return_generic_metadata,
+        test_analyze_func_deps_graph_target_extras_are_preserved,
+        test_analyze_func_deps_graph_multi_layer_regular_function_chain,
     ];
     run_in_parallel(can_share_daemon_tests);
 
     test_subsequent_command_faster_than_first();
+
+    stop_daemon();
 }

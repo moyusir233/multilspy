@@ -16,6 +16,9 @@ pub struct RustAnalyzerConfig {
     pub initialize_params_path: PathBuf,
     /// 等待lsp server发起workdoneProgress创建请求的最大时间窗口，默认60秒
     pub wait_work_done_progress_create_max_time: Duration,
+    /// 是否需要保证任意关于文档的lsp请求操作都需要执行`textDocument/didOpen`与`textDocument/didClose` notification
+    /// 如果是纯静态的分析，即磁盘上的文件内容总是可靠的，则不需要打开这个选项
+    pub need_open_file: bool,
 }
 
 fn get_rust_analyzer_path() -> anyhow::Result<PathBuf> {
@@ -41,6 +44,7 @@ impl RustAnalyzerConfig {
             env: vec![("RA_LOG".to_string(), "info".to_string())],
             ra_stderr_log_path: None,
             wait_work_done_progress_create_max_time: Duration::from_secs(30),
+            need_open_file: false,
         };
 
         if let Ok(current_dir) = std::env::current_dir() {

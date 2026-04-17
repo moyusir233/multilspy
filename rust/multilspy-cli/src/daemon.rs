@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use crate::ipc::*;
 use crate::lifecycle;
+use multilspy_rust::AnalyzeFuncDepsGraphParams;
 
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(7200);
 
@@ -320,15 +321,15 @@ async fn dispatch(req: IpcRequest, state: &DaemonState) -> IpcResponse {
             }
         }
 
-        "analyze-trait-impl-deps-graph" => {
-            let params: AnalyzeTraitImplDepsGraphIpcParams =
-                match serde_json::from_value(req.params) {
-                    Ok(p) => p,
-                    Err(e) => return IpcResponse::error(ERR_INVALID_PARAMS, e.to_string()),
-                };
+        "analyze-func-deps-graph" => {
+            let params: AnalyzeFuncDepsGraphIpcParams = match serde_json::from_value(req.params) {
+                Ok(p) => p,
+                Err(e) => return IpcResponse::error(ERR_INVALID_PARAMS, e.to_string()),
+            };
+            let AnalyzeFuncDepsGraphIpcParams { targets } = params;
             match state
                 .client
-                .analyze_trait_impl_deps_graph(params.trait_names, params.target_dir_uris)
+                .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams { targets })
                 .await
             {
                 Ok(r) => to_success(r),

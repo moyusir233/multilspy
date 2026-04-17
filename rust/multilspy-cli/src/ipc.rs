@@ -1,4 +1,5 @@
 use multilspy_protocol::protocol::common::WorkspaceSymbol;
+use multilspy_rust::AnalyzeFuncDepsGraphTarget;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,9 +83,9 @@ pub struct WorkspaceSymbolResolveIpcParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnalyzeTraitImplDepsGraphIpcParams {
-    pub trait_names: Vec<String>,
-    pub target_dir_uris: Vec<String>,
+pub struct AnalyzeFuncDepsGraphIpcParams {
+    #[serde(default)]
+    pub targets: Vec<AnalyzeFuncDepsGraphTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

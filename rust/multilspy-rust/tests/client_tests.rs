@@ -1,7 +1,10 @@
 use multilspy_protocol::protocol::common::{
     WorkspaceSymbol, WorkspaceSymbolItem, WorkspaceSymbolLocation,
 };
-use multilspy_rust::{LSPClient, RustAnalyzerConfig, TraitImplDepsGraphDependency};
+use multilspy_rust::{
+    AnalyzeFuncDepsGraphDependency, AnalyzeFuncDepsGraphFnType, AnalyzeFuncDepsGraphParams,
+    AnalyzeFuncDepsGraphTarget, LSPClient, RustAnalyzerConfig,
+};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -1011,19 +1014,44 @@ fn src_dir_uri() -> String {
     format!("file://{}", src_dir.display())
 }
 
+fn main_rs_uri() -> String {
+    file_uri()
+}
+
+fn empty_extra() -> std::collections::HashMap<String, serde_json::Value> {
+    std::collections::HashMap::new()
+}
+
+fn extra(entries: &[(&str, serde_json::Value)]) -> std::collections::HashMap<String, serde_json::Value> {
+    entries
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), value.clone()))
+        .collect()
+}
+
+fn trait_target(trait_name: &str, target_dir_uri: String) -> AnalyzeFuncDepsGraphTarget {
+    AnalyzeFuncDepsGraphTarget::TraitImpl {
+        trait_name: trait_name.to_string(),
+        target_dir_uri,
+        extra: empty_extra(),
+    }
+}
+
 // ---------------------------------------------------------------------------
-// LSPClient::analyze_trait_impl_deps_graph
+// LSPClient::analyze_func_deps_graph
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
+async fn test_analyze_func_deps_graph_trait_not_found_returns_empty() {
     if !rust_analyzer_available() {
         return;
     }
     let client = make_client().await;
 
     let result = client
-        .analyze_trait_impl_deps_graph(vec!["DefinitelyNotATrait".to_string()], vec![src_dir_uri()])
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![trait_target("DefinitelyNotATrait", src_dir_uri())],
+        })
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -1032,14 +1060,16 @@ async fn test_analyze_trait_impl_deps_graph_trait_not_found_returns_empty() {
 }
 
 #[tokio::test]
-async fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
+async fn test_analyze_func_deps_graph_trait_with_impl_but_no_functions_returns_empty() {
     if !rust_analyzer_available() {
         return;
     }
     let client = make_client().await;
 
     let result = client
-        .analyze_trait_impl_deps_graph(vec!["Marker".to_string()], vec![src_dir_uri()])
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![trait_target("Marker", src_dir_uri())],
+        })
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -1048,31 +1078,38 @@ async fn test_analyze_trait_impl_deps_graph_trait_with_impl_but_no_functions_ret
 }
 
 #[tokio::test]
-async fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_target_set() {
+async fn test_analyze_func_deps_graph_builds_dependency_edges_within_target_set() {
     if !rust_analyzer_available() {
         return;
     }
     let client = make_client().await;
 
     let result = client
-        .analyze_trait_impl_deps_graph(vec!["Chain".to_string()], vec![src_dir_uri()])
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![trait_target("Chain", src_dir_uri())],
+        })
         .await
         .unwrap();
     assert!(!result.is_empty());
 
-    let chain_a = result
-        .iter()
-        .find(|item| item.trait_name == "Chain" && item.function_name == "a");
-    let chain_b = result
-        .iter()
-        .find(|item| item.trait_name == "Chain" && item.function_name == "b");
+    let chain_a = result.iter().find(|item| {
+        item.fn_type == AnalyzeFuncDepsGraphFnType::TraitImpl
+            && item.extra.get("trait_name") == Some(&serde_json::json!("Chain"))
+            && item.function_name == "a"
+    });
+    let chain_b = result.iter().find(|item| {
+        item.fn_type == AnalyzeFuncDepsGraphFnType::TraitImpl
+            && item.extra.get("trait_name") == Some(&serde_json::json!("Chain"))
+            && item.function_name == "b"
+    });
     let chain_a = chain_a.expect("should include Chain::a");
     let chain_b = chain_b.expect("should include Chain::b");
 
-    let expected = TraitImplDepsGraphDependency {
-        trait_name: chain_b.trait_name.clone(),
+    let expected = AnalyzeFuncDepsGraphDependency {
+        fn_type: AnalyzeFuncDepsGraphFnType::TraitImpl,
         file_uri: chain_b.file_uri.clone(),
         function_name: chain_b.function_name.clone(),
+        range: chain_b.range.clone(),
     };
     assert!(
         chain_a.dependencies.iter().any(|d| d == &expected),
@@ -1083,7 +1120,7 @@ async fn test_analyze_trait_impl_deps_graph_builds_dependency_edges_within_targe
 }
 
 #[tokio::test]
-async fn test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union() {
+async fn test_analyze_func_deps_graph_multiple_target_dirs_returns_union() {
     if !rust_analyzer_available() {
         return;
     }
@@ -1097,14 +1134,200 @@ async fn test_analyze_trait_impl_deps_graph_multiple_target_dirs_returns_union()
     );
 
     let result = client
-        .analyze_trait_impl_deps_graph(
-            vec!["Chain".to_string()],
-            vec![workspace_uri, src_dir_uri()],
-        )
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![
+                trait_target("Chain", workspace_uri),
+                trait_target("Chain", src_dir_uri()),
+            ],
+        })
         .await
         .unwrap();
     assert!(result.iter().any(|item| item.function_name == "a"));
     assert!(result.iter().any(|item| item.function_name == "b"));
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_func_deps_graph_with_targets_supports_regular_functions() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![
+                AnalyzeFuncDepsGraphTarget::RegularFunction {
+                    file_uri: main_rs_uri(),
+                    line: 34,
+                    character: 0,
+                    extra: empty_extra(),
+                },
+                AnalyzeFuncDepsGraphTarget::RegularFunction {
+                    file_uri: main_rs_uri(),
+                    line: 24,
+                    character: 0,
+                    extra: empty_extra(),
+                },
+            ],
+        })
+        .await
+        .unwrap();
+
+    let helper = result
+        .iter()
+        .find(|item| {
+            item.fn_type == AnalyzeFuncDepsGraphFnType::RegularFunction
+                && item.function_name == "helper"
+        })
+        .expect("should include helper");
+    assert!(helper.dependencies.iter().any(|dependency| {
+        dependency.fn_type == AnalyzeFuncDepsGraphFnType::RegularFunction
+            && dependency.function_name == "create_hello"
+    }));
+    assert!(helper.dependencies.iter().any(|dependency| {
+        dependency.function_name == "create_hello" && dependency.range.start.line == 24
+    }));
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_func_deps_graph_with_targets_supports_mixed_targets() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![
+                trait_target("Chain", src_dir_uri()),
+                AnalyzeFuncDepsGraphTarget::RegularFunction {
+                    file_uri: main_rs_uri(),
+                    line: 34,
+                    character: 0,
+                    extra: empty_extra(),
+                },
+            ],
+        })
+        .await
+        .unwrap();
+
+    assert!(result.iter().any(|item| {
+        item.fn_type == AnalyzeFuncDepsGraphFnType::TraitImpl
+            && item.extra.get("trait_name") == Some(&serde_json::json!("Chain"))
+    }));
+    assert!(result.iter().any(|item| {
+        item.fn_type == AnalyzeFuncDepsGraphFnType::RegularFunction
+            && item.function_name == "helper"
+    }));
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_func_deps_graph_with_targets_preserves_extra_metadata() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![
+                AnalyzeFuncDepsGraphTarget::TraitImpl {
+                    trait_name: "Chain".to_string(),
+                    target_dir_uri: src_dir_uri(),
+                    extra: extra(&[("label", serde_json::json!("core"))]),
+                },
+                AnalyzeFuncDepsGraphTarget::RegularFunction {
+                    file_uri: main_rs_uri(),
+                    line: 34,
+                    character: 0,
+                    extra: extra(&[("ticket", serde_json::json!("ABC-123"))]),
+                },
+            ],
+        })
+        .await
+        .unwrap();
+
+    assert!(result.iter().any(|item| {
+        item.fn_type == AnalyzeFuncDepsGraphFnType::TraitImpl
+            && item.extra.get("trait_name") == Some(&serde_json::json!("Chain"))
+            && item.extra.get("label") == Some(&serde_json::json!("core"))
+    }));
+    assert!(result.iter().any(|item| {
+        item.fn_type == AnalyzeFuncDepsGraphFnType::RegularFunction
+            && item.function_name == "helper"
+            && item.extra.get("ticket") == Some(&serde_json::json!("ABC-123"))
+    }));
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_func_deps_graph_tracks_multi_layer_regular_function_dependencies() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let result = client
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![
+                AnalyzeFuncDepsGraphTarget::RegularFunction {
+                    file_uri: main_rs_uri(),
+                    line: 39,
+                    character: 0,
+                    extra: empty_extra(),
+                },
+                AnalyzeFuncDepsGraphTarget::RegularFunction {
+                    file_uri: main_rs_uri(),
+                    line: 24,
+                    character: 0,
+                    extra: empty_extra(),
+                },
+            ],
+        })
+        .await
+        .unwrap();
+
+    let top_level = result
+        .iter()
+        .find(|item| item.function_name == "main")
+        .expect("should include main");
+    assert!(top_level.dependencies.iter().any(|dependency| {
+        dependency.function_name == "create_hello"
+    }));
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_analyze_func_deps_graph_with_targets_rejects_non_function_position() {
+    if !rust_analyzer_available() {
+        return;
+    }
+    let client = make_client().await;
+
+    let error = client
+        .analyze_func_deps_graph_with_targets(AnalyzeFuncDepsGraphParams {
+            targets: vec![AnalyzeFuncDepsGraphTarget::RegularFunction {
+                file_uri: main_rs_uri(),
+                line: 4,
+                character: 0,
+                extra: empty_extra(),
+            }],
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("does not resolve to a function or method symbol")
+    );
 
     client.shutdown().await.unwrap();
 }

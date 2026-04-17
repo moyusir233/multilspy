@@ -165,7 +165,7 @@ Analyze dependencies between functions implementing specified traits, or between
 
 Analyze trait implementations:
 ```bash
-ra-lsp analyze-func-deps-graph MyTrait --target-dir src --target-dir tests
+ra-lsp analyze-func-deps-graph --trait-function-target src,MyTrait --trait-function-target tests,MyTrait
 ```
 
 Analyze specific functions:
@@ -173,16 +173,20 @@ Analyze specific functions:
 ra-lsp analyze-func-deps-graph --function-target src/main.rs,10,5 --function-target src/lib.rs,20,3
 ```
 
-Use target specs with custom metadata:
+Add custom metadata to targets:
 ```bash
-ra-lsp analyze-func-deps-graph --target-spec '{"fn_type":"trait_impl","trait_name":"MyTrait","target_dir":"src","extra":{"label":"core"}}'
+ra-lsp analyze-func-deps-graph \
+  --trait-function-target src,Chain \
+  --trait-function-target-extra '{"label":"core"}' \
+  --function-target src/main.rs,35,0 \
+  --function-target-extra '{"ticket":"ABC-123"}'
 ```
 
 Options:
-- `<TRAIT>...`: Trait names to analyze (repeat for multiple traits)
-- `--target-dir <DIR>`: Target directories to search for trait implementations (repeat for multiple directories, required when traits are provided)
-- `--function-target <PATH,LINE,CHARACTER>`: Specific functions to analyze (repeat for multiple functions)
-- `--target-spec <JSON>`: Generic target specifications with optional extra metadata (repeat for multiple targets)
+- `--function-target <PATH,LINE,CHARACTER>`: Regular function target location; repeat to analyze multiple functions
+- `--function-target-extra <JSON>`: JSON object metadata for the corresponding `--function-target` entry; repeat in the same order
+- `--trait-function-target <TARGET_DIR,TRAIT_NAME>`: Trait implementation function target location; repeat to analyze multiple trait implementations
+- `--trait-function-target-extra <JSON>`: JSON object metadata for the corresponding `--trait-function-target` entry; repeat in the same order
 
 #### `status`
 Check the status of the daemon for the current workspace.
