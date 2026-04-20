@@ -251,10 +251,7 @@ fn run_in_parallel(tests: &[TestFn]) {
     }
 
     // Cap fan-out so concurrent CLI processes do not overwhelm one daemon.
-    let num_threads = std::thread::available_parallelism()
-        .map(|n| n.get().min(8))
-        .unwrap_or(4)
-        .min(tests.len());
+    let num_threads = 4;
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
